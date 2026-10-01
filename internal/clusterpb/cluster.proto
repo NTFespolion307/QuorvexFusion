@@ -1,0 +1,157 @@
+// Wire protocol between workers and the controller.
+//
+// Regenerate the Go code after editing with `make proto` (needs protoc,
+// protoc-gen-go and protoc-gen-go-grpc). The generated files are committed so
+// normal builds never need protoc.
+syntax = "proto3";
+
+package cluster.v1;
+
+option go_package = "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb";
+
+// NodeService is served by the controller on its node port (default 7443).
+// Workers are always the client: they dial out, so they need no open ports
+// and work behind NAT and inside containers.
+service NodeService {
+  // Join trades a join token and a certificate signing request for a node
+  // certificate. It is the only RPC callable without a client certificate,
+  // and it is rate-limited per source IP.
+  //
+  // A worker whose join is pending approval calls Join again with the same
+  // key (the token may be empty then); the CSR signature proves it is the
+  // same node.
+  rpc Join(JoinRequest) returns (JoinResponse);
+
+  // Connect is the long-lived control stream of an approved node. The first
+  // worker message must be a Hello. Any message counts as a heartbeat.
+  rpc Connect(stream WorkerMessage) returns (stream ControllerMessage);
+}
+
+message JoinRequest {
+  string token = 1;
+  bytes csr_der = 2;   // PKCS#10 CSR signed by the worker's private key
+  string hostname = 3;
+  string location = 4;
+  bool ephemeral = 5;
+}
+
+message JoinResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    APPROVED = 1;
+    PENDING = 2;
+  }
+  Status status = 1;
+  string node_id = 2;
+  bytes cert_der = 3;     // node certificate, set when APPROVED
+  bytes ca_cert_der = 4;  // controller CA certificate
+}
+
+message WorkerMessage {
+  oneof msg {
+    Hello hello = 1;
+    Metrics metrics = 2;
+    Pong pong = 3;
+  }
+}
+
+message ControllerMessage {
+  oneof msg {
+    Welcome welcome = 1;
+    Ping ping = 2;
+  }
+}
+
+message Hello {
+  string version = 1;
+  HardwareInfo hardware = 2;
+  string location = 3;
+  bool ephemeral = 4;
+  map<string, string> labels = 5;
+  string shared_storage = 6;  // optional path shared with the controller/other nodes
+}
+
+message Welcome {
+  string node_id = 1;
+  int32 metrics_interval_seconds = 2;
+}
+
+// Ping/Pong let the controller measure round-trip latency to each node.
+message Ping {
+  int64 nonce = 1;
+}
+
+message Pong {
+  int64 nonce = 1;
+}
+
+message HardwareInfo {
+  string hostname = 1;
+  string os = 2;
+  string kernel = 3;
+  string arch = 4;
+  string cpu_model = 5;
+  int32 logical_cores = 6;
+  int32 physical_cores = 7;
+  // Cores actually usable after any cgroup CPU quota (e.g. inside a vast.ai
+  // container). Equals logical_cores when unlimited.
+  double cpu_limit = 8;
+  // Usable RAM: the smaller of physical RAM and any cgroup memory limit.
+  uint64 memory_bytes = 9;
+  repeated Disk disks = 10;
+  repeated GPU gpus = 11;
+  bool in_container = 12;
+  bool docker = 13;         // docker CLI present and daemon reachable
+  bool nvidia_docker = 14;  // NVIDIA container toolkit usable with docker
+  bool systemd = 15;        // systemd-run available for cgroup limits
+  repeated string ips = 16;
+  int64 boot_time_unix = 17;
+}
+
+message Disk {
+  string mount = 1;
+  string device = 2;
+  string fstype = 3;
+  uint64 total_bytes = 4;
+  uint64 free_bytes = 5;
+}
+
+message GPU {
+  int32 index = 1;
+  string vendor = 2;  // "nvidia" or "amd"
+  string name = 3;
+  string uuid = 4;
+  uint64 memory_bytes = 5;
+  string driver = 6;
+}
+
+message Metrics {
+  int64 time_unix_ms = 1;
+  double cpu_percent = 2;
+  repeated double cpu_per_core = 3;
+  uint64 mem_used_bytes = 4;
+  uint64 mem_total_bytes = 5;
+  double load1 = 6;
+  double load5 = 7;
+  double load15 = 8;
+  repeated DiskUsage disks = 9;
+  uint64 net_rx_bytes_per_sec = 10;
+  uint64 net_tx_bytes_per_sec = 11;
+  repeated GPUMetrics gpus = 12;
+  uint64 uptime_seconds = 13;
+}
+
+message DiskUsage {
+  string mount = 1;
+  uint64 used_bytes = 2;
+  uint64 total_bytes = 3;
+}
+
+message GPUMetrics {
+  int32 index = 1;
+  double utilization_percent = 2;
+  uint64 memory_used_bytes = 3;
+  uint64 memory_total_bytes = 4;
+  double temperature_c = 5;
+  double power_watts = 6;
+}
