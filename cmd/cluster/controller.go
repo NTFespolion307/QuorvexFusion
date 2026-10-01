@@ -110,6 +110,7 @@ func controllerInitCmd(dataDir *string) *cobra.Command {
 					"ca_fingerprint": res.CAFingerprint, "join_token": res.JoinToken, "cli_config": cliConfig,
 				})
 			}
+			self := selfCommand()
 			fmt.Printf(`Controller initialised in %s
 
   Web UI:          %s   (log in with the admin password)
@@ -121,12 +122,12 @@ First join token (auto-approve, valid 7 days):
   %s
 
 Join a worker with:
-  cluster worker --controller %s --token %s --ca-fingerprint %s
+  %s worker --controller %s --token %s --ca-fingerprint %s
 
 Start the controller with:
-  cluster controller --data-dir %s
+  %s controller --data-dir %s
 `, *dataDir, cfg.UIURL(), cfg.NodeAddr(), res.CAFingerprint, cliConfig,
-				res.JoinToken, cfg.NodeAddr(), res.JoinToken, res.CAFingerprint, *dataDir)
+				res.JoinToken, self, cfg.NodeAddr(), res.JoinToken, res.CAFingerprint, self, *dataDir)
 			return nil
 		},
 	}

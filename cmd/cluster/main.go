@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -80,6 +83,39 @@ func newLogger() *slog.Logger {
 		level = slog.LevelError
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+// selfCommand is how to invoke this binary in printed commands: plain
+// "cluster" when that is what's on PATH (the installed case), otherwise the
+// path it was started with, e.g. ".\cluster.exe" or "./bin/cluster".
+func selfCommand() string {
+	self, err := os.Executable()
+	if err == nil {
+		if onPath, err := exec.LookPath("cluster"); err == nil {
+			a, errA := filepath.EvalSymlinks(self)
+			b, errB := filepath.EvalSymlinks(onPath)
+			if errA == nil && errB == nil && strings.EqualFold(a, b) {
+				return "cluster"
+			}
+		}
+	}
+	cmd := os.Args[0]
+	if !strings.ContainsAny(cmd, `/\`) {
+		// Started via PATH under another name, or from the current directory
+		// on Windows, which PowerShell won't do without an explicit .\ prefix.
+		if runtime.GOOS == "windows" {
+			cmd = `.\` + cmd
+		} else if onPath, err := exec.LookPath(cmd); err != nil || onPath == "" {
+			cmd = "./" + cmd
+		}
+	}
+	if strings.ContainsAny(cmd, " \t") {
+		cmd = `"` + cmd + `"`
+		if runtime.GOOS == "windows" {
+			cmd = "& " + cmd // PowerShell needs the call operator to run a quoted path
+		}
+	}
+	return cmd
 }
 
 // envOr returns the environment variable's value, or def if unset.
