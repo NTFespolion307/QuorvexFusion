@@ -24,7 +24,7 @@ const exitRevoked = 3
 
 type workerFlags struct {
 	dataDir, controller, token, fingerprint string
-	name, location, sharedStorage           string
+	name, location, sharedStorage, taskUser string
 	ephemeral, yes                          bool
 	labels                                  map[string]string
 }
@@ -40,6 +40,7 @@ func (wf *workerFlags) register(cmd *cobra.Command) {
 	f.StringVar(&wf.location, "location", os.Getenv("CLUSTER_LOCATION"), "location label, e.g. home, vastai, gcp-us-central1")
 	f.StringVar(&wf.sharedStorage, "shared-storage", os.Getenv("CLUSTER_SHARED_STORAGE"), "path of storage shared with the controller (skips file transfers)")
 	f.BoolVar(&wf.ephemeral, "ephemeral", os.Getenv("CLUSTER_EPHEMERAL") == "1", "mark this node as ephemeral (cloud/rented)")
+	f.StringVar(&wf.taskUser, "task-user", os.Getenv("CLUSTER_TASK_USER"), "run tasks as this user (default: 'cluster' if it exists and the worker is root)")
 	f.BoolVar(&wf.yes, "yes", false, "trust the controller's CA without a prompt if no --ca-fingerprint is given")
 	f.StringToStringVar(&wf.labels, "label", nil, "node label key=value (repeatable)")
 }
@@ -49,7 +50,7 @@ func (wf *workerFlags) options() worker.Options {
 		DataDir: wf.dataDir, Controller: wf.controller, Token: wf.token, CAFingerprint: wf.fingerprint,
 		ConfirmFingerprint: fingerprintConfirmer(wf.yes),
 		Name:               wf.name, Location: wf.location, Ephemeral: wf.ephemeral,
-		Labels: wf.labels, SharedStorage: wf.sharedStorage,
+		Labels: wf.labels, SharedStorage: wf.sharedStorage, TaskUser: wf.taskUser,
 		Log: newLogger(),
 	}
 }

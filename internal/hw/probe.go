@@ -79,7 +79,7 @@ func Probe() *pb.HardwareInfo {
 	info.Gpus = probeGPUs()
 	info.InContainer = inContainer()
 	info.Docker, info.NvidiaDocker = probeDocker(len(info.Gpus) > 0)
-	info.Systemd = hasSystemd()
+	info.Systemd = HasSystemd()
 	info.Ips = localIPs()
 	info.BootTimeUnix = bootTime(readFile("/proc/stat"))
 	return info
@@ -253,7 +253,8 @@ func probeDocker(wantGPU bool) (docker, nvidia bool) {
 	return true, nvidia
 }
 
-func hasSystemd() bool {
+// HasSystemd reports whether systemd manages this machine and systemd-run exists.
+func HasSystemd() bool {
 	if _, err := os.Stat("/run/systemd/system"); err != nil {
 		return false
 	}

@@ -1,0 +1,2 @@
+time=2026-10-01T12:02:08.441-04:00 level=INFO msg="controller started" node_listen=127.0.0.1:37443 http_listen=127.0.0.1:38443 ui=https://127.0.0.1:38443 ca_fingerprint=sha256:7c944266b95b625156492f356b8912f432e3736d3a8de25f83318e56ff64f77f
+time=2026-10-01T12:02:13.491-04:00 level=INFO msg="job submitted" job=j68888ddd tasks=1 name="id -un; cg=$(cut -d: -f3 /proc/self/cgroup); echo \"cgroup..."

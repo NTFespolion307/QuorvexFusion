@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"os/user"
 	"time"
 
 	"google.golang.org/grpc"
@@ -21,6 +22,7 @@ import (
 	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
 	"github.com/NTFespolion307/QuorvexFusion/internal/hw"
 	"github.com/NTFespolion307/QuorvexFusion/internal/pki"
+	"github.com/NTFespolion307/QuorvexFusion/internal/runner"
 	"github.com/NTFespolion307/QuorvexFusion/internal/version"
 )
 
@@ -37,6 +39,10 @@ type Options struct {
 	// no CAFingerprint is given (interactive prompt, or --yes).
 	ConfirmFingerprint func(fp string) bool
 
+	// TaskUser runs tasks as this user ("" = automatic: "cluster" if the
+	// worker is root and that user exists, else the worker's own user).
+	TaskUser string
+
 	Name          string // overrides the reported hostname
 	Location      string
 	Ephemeral     bool
@@ -47,9 +53,10 @@ type Options struct {
 }
 
 type Worker struct {
-	opts Options
-	id   identity
-	log  *slog.Logger
+	opts   Options
+	id     identity
+	log    *slog.Logger
+	runner *runner.Runner
 }
 
 func New(opts Options) *Worker {
@@ -111,9 +118,20 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 	}
 
+	if err := w.startRunner(); err != nil {
+		return err
+	}
+	defer w.runner.Shutdown()
+
 	ca, err := w.id.ca()
 	if err != nil {
 		return err
+	}
+	// A data dir from an earlier join to a different controller would
+	// otherwise fail TLS forever with a confusing error.
+	if fp := w.opts.CAFingerprint; fp != "" && pki.Fingerprint(ca) != pki.NormalizeFingerprint(fp) {
+		return fmt.Errorf("%s holds the identity of a node of a different controller (CA %s, but --ca-fingerprint is %s); "+
+			"remove that directory to join this controller", w.id.dir, pki.Fingerprint(ca), pki.NormalizeFingerprint(fp))
 	}
 	cert, err := w.id.tlsCert()
 	if err != nil {
@@ -155,6 +173,31 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
+// startRunner prepares task execution: which user tasks run as, and
+// whether systemd can enforce CPU/memory limits (needs root).
+func (w *Worker) startRunner() error {
+	taskUser := w.opts.TaskUser
+	if taskUser == "" && os.Geteuid() == 0 {
+		if _, err := user.Lookup("cluster"); err == nil {
+			taskUser = "cluster"
+		} else {
+			w.log.Warn("tasks will run as root: create a 'cluster' user or pass --task-user")
+		}
+	}
+	useSystemd := hw.HasSystemd() && os.Geteuid() == 0
+	if !useSystemd {
+		w.log.Info("systemd-run not usable (needs systemd and root); task CPU/memory limits are not enforced")
+	}
+	r, err := runner.New(runner.Options{
+		Dir: w.id.path("tasks"), TaskUser: taskUser, UseSystemd: useSystemd, Log: w.log,
+	})
+	if err != nil {
+		return err
+	}
+	w.runner = r
+	return nil
+}
+
 // session runs one control stream until it fails. welcomed reports whether
 // the controller accepted us (used to reset the backoff).
 func (w *Worker) session(ctx context.Context, client pb.NodeServiceClient) (welcomed bool, err error) {
@@ -175,6 +218,7 @@ func (w *Worker) session(ctx context.Context, client pb.NodeServiceClient) (welc
 	err = stream.Send(&pb.WorkerMessage{Msg: &pb.WorkerMessage_Hello{Hello: &pb.Hello{
 		Version: version.Version, Hardware: info, Location: w.opts.Location,
 		Ephemeral: w.opts.Ephemeral, Labels: w.opts.Labels, SharedStorage: w.opts.SharedStorage,
+		RunningAttempts: w.runner.Held(),
 	}}})
 	if err != nil {
 		return false, err
@@ -206,12 +250,17 @@ func (w *Worker) session(ctx context.Context, client pb.NodeServiceClient) (welc
 			}
 		}
 	}()
-	send := func(m *pb.WorkerMessage) {
+	send := func(m *pb.WorkerMessage) bool {
 		select {
 		case out <- m:
+			return true
 		case <-ctx.Done():
+			return false
 		}
 	}
+	// The runner resends logs and results from where the controller is.
+	w.runner.Connected(send, welcome.LogOffsets)
+	defer w.runner.Disconnected()
 
 	// Metrics loop; doubles as the heartbeat.
 	interval := time.Duration(welcome.MetricsIntervalSeconds) * time.Second
@@ -245,6 +294,12 @@ func (w *Worker) session(ctx context.Context, client pb.NodeServiceClient) (welc
 		switch m := msg.Msg.(type) {
 		case *pb.ControllerMessage_Ping:
 			send(&pb.WorkerMessage{Msg: &pb.WorkerMessage_Pong{Pong: &pb.Pong{Nonce: m.Ping.Nonce}}})
+		case *pb.ControllerMessage_Assign:
+			w.runner.Start(m.Assign)
+		case *pb.ControllerMessage_Cancel:
+			w.runner.Cancel(m.Cancel.AttemptId, m.Cancel.Reason)
+		case *pb.ControllerMessage_ResultAck:
+			w.runner.Ack(m.ResultAck.AttemptId)
 		}
 	}
 }

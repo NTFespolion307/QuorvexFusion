@@ -99,6 +99,60 @@ CREATE TABLE api_tokens (
 	last_used   INTEGER
 );
 `,
+	// 2: jobs, tasks, attempts
+	`
+CREATE TABLE jobs (
+	id          TEXT PRIMARY KEY,
+	name        TEXT NOT NULL,
+	spec        TEXT NOT NULL,              -- JSON job spec as submitted
+	priority    INTEGER NOT NULL DEFAULT 0,
+	task_count  INTEGER NOT NULL,
+	canceled    INTEGER NOT NULL DEFAULT 0,
+	created_at  INTEGER NOT NULL
+);
+
+-- One row per task (one per array index). A task is retried by creating
+-- new attempts; the task row tracks the current one.
+CREATE TABLE tasks (
+	id           TEXT PRIMARY KEY,          -- "<job id>.<index>"
+	job_id       TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+	idx          INTEGER NOT NULL,          -- array index ({i})
+	seq          INTEGER NOT NULL,          -- queue order
+	state        TEXT NOT NULL,             -- queued | assigned | running | succeeded | failed | canceled
+	attempts     INTEGER NOT NULL DEFAULT 0,
+	failures     INTEGER NOT NULL DEFAULT 0, -- failed attempts (count against retries)
+	lost         INTEGER NOT NULL DEFAULT 0, -- attempts lost with their node (don't count)
+	attempt_id   TEXT NOT NULL DEFAULT '',  -- current/last attempt
+	node_id      TEXT NOT NULL DEFAULT '',
+	exit_code    INTEGER,
+	error        TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	started_at   INTEGER,
+	finished_at  INTEGER
+);
+CREATE INDEX tasks_queue ON tasks(state, seq);
+CREATE INDEX tasks_job ON tasks(job_id, idx);
+
+-- One row per placement of a task on a node. Only the task's current
+-- attempt may complete it, which is what makes completion exactly-once.
+CREATE TABLE attempts (
+	id           TEXT PRIMARY KEY,
+	task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+	number       INTEGER NOT NULL,
+	node_id      TEXT NOT NULL,
+	state        TEXT NOT NULL,             -- assigned | running | succeeded | failed | canceled | lost
+	cpus         REAL NOT NULL,
+	memory_bytes INTEGER NOT NULL,
+	gpus         TEXT NOT NULL DEFAULT '[]', -- JSON list of assigned GPUs
+	exit_code    INTEGER,
+	error        TEXT NOT NULL DEFAULT '',
+	created_at   INTEGER NOT NULL,
+	started_at   INTEGER,
+	finished_at  INTEGER
+);
+CREATE INDEX attempts_task ON attempts(task_id, number);
+CREATE INDEX attempts_state ON attempts(state);
+`,
 }
 
 func (s *Store) migrate() error {

@@ -194,7 +194,7 @@ func publiclyTrusted(base string) bool {
 func statusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show the resource pool",
+		Short: "Show the resource pool and task counts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var p controller.PoolSummary
 			if err := call("GET", "/api/v1/status", nil, &p); err != nil {
@@ -203,14 +203,19 @@ func statusCmd() *cobra.Command {
 			if globalFlags.json {
 				return printJSON(p)
 			}
-			fmt.Printf("Nodes: %d online, %d offline, %d pending\n\n", p.NodesOnline, p.NodesOffline, p.NodesPending)
+			fmt.Printf("Nodes: %d online, %d offline, %d pending\n", p.NodesOnline, p.NodesOffline, p.NodesPending)
+			fmt.Printf("Tasks: %d running, %d queued\n\n", p.Tasks.Running+p.Tasks.Assigned, p.Tasks.Queued)
 			t := newTable()
-			fmt.Fprintln(t, "LOCATION\tCPUS\tMEMORY\tGPUS")
-			for _, loc := range p.Locations {
-				r := p.ByLocation[loc]
-				fmt.Fprintf(t, "%s\t%.1f\t%s\t%d\n", loc, r.CPUs, humanBytes(r.MemoryBytes), r.GPUs)
+			fmt.Fprintln(t, "LOCATION\tCPUS (used/total)\tMEMORY (used/total)\tGPUS (used/total)")
+			row := func(name string, used, total controller.Resources) {
+				fmt.Fprintf(t, "%s\t%.4g / %.4g\t%s / %s\t%d / %d\n", name, used.CPUs, total.CPUs,
+					humanBytes(used.MemoryBytes), humanBytes(total.MemoryBytes), used.GPUs, total.GPUs)
 			}
-			fmt.Fprintf(t, "TOTAL\t%.1f\t%s\t%d\n", p.Total.CPUs, humanBytes(p.Total.MemoryBytes), p.Total.GPUs)
+			for _, loc := range p.Locations {
+				l := p.ByLocation[loc]
+				row(loc, l.Used, l.Total)
+			}
+			row("TOTAL", p.Used, p.Total)
 			return t.Flush()
 		},
 	}
@@ -236,9 +241,9 @@ func nodesCmd() *cobra.Command {
 			for _, n := range nodes {
 				cpus, mem, gpus, cpuPct, memPct, rtt := "-", "-", "-", "-", "-", "-"
 				if hw := n.Hardware; hw != nil {
-					cpus = fmt.Sprintf("%.4g", hw.CpuLimit)
-					mem = humanBytes(hw.MemoryBytes)
-					gpus = fmt.Sprint(len(hw.Gpus))
+					cpus = fmt.Sprintf("%.4g/%.4g", n.Used.CPUs, hw.CpuLimit)
+					mem = humanBytes(n.Used.MemoryBytes) + "/" + humanBytes(hw.MemoryBytes)
+					gpus = fmt.Sprintf("%d/%d", n.Used.GPUs, len(hw.Gpus))
 				}
 				if m := n.Metrics; m != nil {
 					cpuPct = fmt.Sprintf("%.0f", m.CpuPercent)

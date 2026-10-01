@@ -52,6 +52,9 @@ message WorkerMessage {
     Hello hello = 1;
     Metrics metrics = 2;
     Pong pong = 3;
+    TaskStarted task_started = 4;
+    LogChunk log = 5;
+    TaskResult result = 6;
   }
 }
 
@@ -59,6 +62,9 @@ message ControllerMessage {
   oneof msg {
     Welcome welcome = 1;
     Ping ping = 2;
+    AssignTask assign = 3;
+    CancelTask cancel = 4;
+    ResultAck result_ack = 5;
   }
 }
 
@@ -69,11 +75,95 @@ message Hello {
   bool ephemeral = 4;
   map<string, string> labels = 5;
   string shared_storage = 6;  // optional path shared with the controller/other nodes
+  // Every attempt this worker still holds: running, still shipping logs, or
+  // finished with a result not yet acknowledged. The controller adopts these
+  // after a reconnect and treats any other attempt it placed here as lost.
+  repeated string running_attempts = 7;
 }
 
 message Welcome {
   string node_id = 1;
   int32 metrics_interval_seconds = 2;
+  // How much of each adopted attempt's logs the controller already has, so
+  // the worker resumes shipping from there.
+  map<string, LogOffsets> log_offsets = 3;
+}
+
+message LogOffsets {
+  int64 stdout = 1;
+  int64 stderr = 2;
+}
+
+// --- tasks ---
+
+message GPUAssignment {
+  int32 index = 1;
+  string uuid = 2;
+  string vendor = 3;
+}
+
+// TaskSpec is everything a worker needs to run one attempt of a task.
+message TaskSpec {
+  string command = 1;  // run with /bin/sh -c; {i} already substituted
+  map<string, string> env = 2;
+  double cpus = 3;
+  uint64 memory_bytes = 4;  // 0 = no limit
+  repeated GPUAssignment gpus = 5;
+  int64 timeout_seconds = 6;  // 0 = no timeout
+}
+
+message AssignTask {
+  string attempt_id = 1;
+  string task_id = 2;
+  string job_id = 3;
+  int32 attempt = 4;  // 1 for the first attempt
+  int64 array_index = 5;
+  TaskSpec spec = 6;
+}
+
+message CancelTask {
+  string attempt_id = 1;
+  string reason = 2;
+}
+
+// ResultAck tells the worker it may delete its buffered result.
+message ResultAck {
+  string attempt_id = 1;
+}
+
+message TaskStarted {
+  string attempt_id = 1;
+  int64 started_unix_ms = 2;
+}
+
+enum Stream {
+  STREAM_UNSPECIFIED = 0;
+  STDOUT = 1;
+  STDERR = 2;
+}
+
+message LogChunk {
+  string attempt_id = 1;
+  Stream stream = 2;
+  int64 offset = 3;  // byte offset of data within the stream
+  bytes data = 4;
+}
+
+message TaskResult {
+  enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    EXITED = 1;           // process exited; see exit_code
+    FAILED_TO_START = 2;  // e.g. command not found by the runner itself
+    TIMED_OUT = 3;
+    CANCELED = 4;
+    LOST = 5;             // worker restarted mid-task; not the task's fault
+  }
+  string attempt_id = 1;
+  Outcome outcome = 2;
+  int32 exit_code = 3;
+  string error = 4;
+  int64 started_unix_ms = 5;
+  int64 finished_unix_ms = 6;
 }
 
 // Ping/Pong let the controller measure round-trip latency to each node.

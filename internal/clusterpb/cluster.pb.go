@@ -27,6 +27,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Stream int32
+
+const (
+	Stream_STREAM_UNSPECIFIED Stream = 0
+	Stream_STDOUT             Stream = 1
+	Stream_STDERR             Stream = 2
+)
+
+// Enum value maps for Stream.
+var (
+	Stream_name = map[int32]string{
+		0: "STREAM_UNSPECIFIED",
+		1: "STDOUT",
+		2: "STDERR",
+	}
+	Stream_value = map[string]int32{
+		"STREAM_UNSPECIFIED": 0,
+		"STDOUT":             1,
+		"STDERR":             2,
+	}
+)
+
+func (x Stream) Enum() *Stream {
+	p := new(Stream)
+	*p = x
+	return p
+}
+
+func (x Stream) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Stream) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_clusterpb_cluster_proto_enumTypes[0].Descriptor()
+}
+
+func (Stream) Type() protoreflect.EnumType {
+	return &file_internal_clusterpb_cluster_proto_enumTypes[0]
+}
+
+func (x Stream) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Stream.Descriptor instead.
+func (Stream) EnumDescriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{0}
+}
+
 type JoinResponse_Status int32
 
 const (
@@ -60,11 +109,11 @@ func (x JoinResponse_Status) String() string {
 }
 
 func (JoinResponse_Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_clusterpb_cluster_proto_enumTypes[0].Descriptor()
+	return file_internal_clusterpb_cluster_proto_enumTypes[1].Descriptor()
 }
 
 func (JoinResponse_Status) Type() protoreflect.EnumType {
-	return &file_internal_clusterpb_cluster_proto_enumTypes[0]
+	return &file_internal_clusterpb_cluster_proto_enumTypes[1]
 }
 
 func (x JoinResponse_Status) Number() protoreflect.EnumNumber {
@@ -74,6 +123,64 @@ func (x JoinResponse_Status) Number() protoreflect.EnumNumber {
 // Deprecated: Use JoinResponse_Status.Descriptor instead.
 func (JoinResponse_Status) EnumDescriptor() ([]byte, []int) {
 	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{1, 0}
+}
+
+type TaskResult_Outcome int32
+
+const (
+	TaskResult_OUTCOME_UNSPECIFIED TaskResult_Outcome = 0
+	TaskResult_EXITED              TaskResult_Outcome = 1 // process exited; see exit_code
+	TaskResult_FAILED_TO_START     TaskResult_Outcome = 2 // e.g. command not found by the runner itself
+	TaskResult_TIMED_OUT           TaskResult_Outcome = 3
+	TaskResult_CANCELED            TaskResult_Outcome = 4
+	TaskResult_LOST                TaskResult_Outcome = 5 // worker restarted mid-task; not the task's fault
+)
+
+// Enum value maps for TaskResult_Outcome.
+var (
+	TaskResult_Outcome_name = map[int32]string{
+		0: "OUTCOME_UNSPECIFIED",
+		1: "EXITED",
+		2: "FAILED_TO_START",
+		3: "TIMED_OUT",
+		4: "CANCELED",
+		5: "LOST",
+	}
+	TaskResult_Outcome_value = map[string]int32{
+		"OUTCOME_UNSPECIFIED": 0,
+		"EXITED":              1,
+		"FAILED_TO_START":     2,
+		"TIMED_OUT":           3,
+		"CANCELED":            4,
+		"LOST":                5,
+	}
+)
+
+func (x TaskResult_Outcome) Enum() *TaskResult_Outcome {
+	p := new(TaskResult_Outcome)
+	*p = x
+	return p
+}
+
+func (x TaskResult_Outcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TaskResult_Outcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_clusterpb_cluster_proto_enumTypes[2].Descriptor()
+}
+
+func (TaskResult_Outcome) Type() protoreflect.EnumType {
+	return &file_internal_clusterpb_cluster_proto_enumTypes[2]
+}
+
+func (x TaskResult_Outcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TaskResult_Outcome.Descriptor instead.
+func (TaskResult_Outcome) EnumDescriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{14, 0}
 }
 
 type JoinRequest struct {
@@ -227,6 +334,9 @@ type WorkerMessage struct {
 	//	*WorkerMessage_Hello
 	//	*WorkerMessage_Metrics
 	//	*WorkerMessage_Pong
+	//	*WorkerMessage_TaskStarted
+	//	*WorkerMessage_Log
+	//	*WorkerMessage_Result
 	Msg           isWorkerMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -296,6 +406,33 @@ func (x *WorkerMessage) GetPong() *Pong {
 	return nil
 }
 
+func (x *WorkerMessage) GetTaskStarted() *TaskStarted {
+	if x != nil {
+		if x, ok := x.Msg.(*WorkerMessage_TaskStarted); ok {
+			return x.TaskStarted
+		}
+	}
+	return nil
+}
+
+func (x *WorkerMessage) GetLog() *LogChunk {
+	if x != nil {
+		if x, ok := x.Msg.(*WorkerMessage_Log); ok {
+			return x.Log
+		}
+	}
+	return nil
+}
+
+func (x *WorkerMessage) GetResult() *TaskResult {
+	if x != nil {
+		if x, ok := x.Msg.(*WorkerMessage_Result); ok {
+			return x.Result
+		}
+	}
+	return nil
+}
+
 type isWorkerMessage_Msg interface {
 	isWorkerMessage_Msg()
 }
@@ -312,11 +449,29 @@ type WorkerMessage_Pong struct {
 	Pong *Pong `protobuf:"bytes,3,opt,name=pong,proto3,oneof"`
 }
 
+type WorkerMessage_TaskStarted struct {
+	TaskStarted *TaskStarted `protobuf:"bytes,4,opt,name=task_started,json=taskStarted,proto3,oneof"`
+}
+
+type WorkerMessage_Log struct {
+	Log *LogChunk `protobuf:"bytes,5,opt,name=log,proto3,oneof"`
+}
+
+type WorkerMessage_Result struct {
+	Result *TaskResult `protobuf:"bytes,6,opt,name=result,proto3,oneof"`
+}
+
 func (*WorkerMessage_Hello) isWorkerMessage_Msg() {}
 
 func (*WorkerMessage_Metrics) isWorkerMessage_Msg() {}
 
 func (*WorkerMessage_Pong) isWorkerMessage_Msg() {}
+
+func (*WorkerMessage_TaskStarted) isWorkerMessage_Msg() {}
+
+func (*WorkerMessage_Log) isWorkerMessage_Msg() {}
+
+func (*WorkerMessage_Result) isWorkerMessage_Msg() {}
 
 type ControllerMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -324,6 +479,9 @@ type ControllerMessage struct {
 	//
 	//	*ControllerMessage_Welcome
 	//	*ControllerMessage_Ping
+	//	*ControllerMessage_Assign
+	//	*ControllerMessage_Cancel
+	//	*ControllerMessage_ResultAck
 	Msg           isControllerMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -384,6 +542,33 @@ func (x *ControllerMessage) GetPing() *Ping {
 	return nil
 }
 
+func (x *ControllerMessage) GetAssign() *AssignTask {
+	if x != nil {
+		if x, ok := x.Msg.(*ControllerMessage_Assign); ok {
+			return x.Assign
+		}
+	}
+	return nil
+}
+
+func (x *ControllerMessage) GetCancel() *CancelTask {
+	if x != nil {
+		if x, ok := x.Msg.(*ControllerMessage_Cancel); ok {
+			return x.Cancel
+		}
+	}
+	return nil
+}
+
+func (x *ControllerMessage) GetResultAck() *ResultAck {
+	if x != nil {
+		if x, ok := x.Msg.(*ControllerMessage_ResultAck); ok {
+			return x.ResultAck
+		}
+	}
+	return nil
+}
+
 type isControllerMessage_Msg interface {
 	isControllerMessage_Msg()
 }
@@ -396,9 +581,27 @@ type ControllerMessage_Ping struct {
 	Ping *Ping `protobuf:"bytes,2,opt,name=ping,proto3,oneof"`
 }
 
+type ControllerMessage_Assign struct {
+	Assign *AssignTask `protobuf:"bytes,3,opt,name=assign,proto3,oneof"`
+}
+
+type ControllerMessage_Cancel struct {
+	Cancel *CancelTask `protobuf:"bytes,4,opt,name=cancel,proto3,oneof"`
+}
+
+type ControllerMessage_ResultAck struct {
+	ResultAck *ResultAck `protobuf:"bytes,5,opt,name=result_ack,json=resultAck,proto3,oneof"`
+}
+
 func (*ControllerMessage_Welcome) isControllerMessage_Msg() {}
 
 func (*ControllerMessage_Ping) isControllerMessage_Msg() {}
+
+func (*ControllerMessage_Assign) isControllerMessage_Msg() {}
+
+func (*ControllerMessage_Cancel) isControllerMessage_Msg() {}
+
+func (*ControllerMessage_ResultAck) isControllerMessage_Msg() {}
 
 type Hello struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -408,8 +611,11 @@ type Hello struct {
 	Ephemeral     bool                   `protobuf:"varint,4,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	Labels        map[string]string      `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	SharedStorage string                 `protobuf:"bytes,6,opt,name=shared_storage,json=sharedStorage,proto3" json:"shared_storage,omitempty"` // optional path shared with the controller/other nodes
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Attempts still running (or still shipping logs) on this worker, so the
+	// controller can adopt them after a reconnect instead of requeueing.
+	RunningAttempts []string `protobuf:"bytes,7,rep,name=running_attempts,json=runningAttempts,proto3" json:"running_attempts,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -484,12 +690,22 @@ func (x *Hello) GetSharedStorage() string {
 	return ""
 }
 
+func (x *Hello) GetRunningAttempts() []string {
+	if x != nil {
+		return x.RunningAttempts
+	}
+	return nil
+}
+
 type Welcome struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	NodeId                 string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	MetricsIntervalSeconds int32                  `protobuf:"varint,2,opt,name=metrics_interval_seconds,json=metricsIntervalSeconds,proto3" json:"metrics_interval_seconds,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// How much of each adopted attempt's logs the controller already has, so
+	// the worker resumes shipping from there.
+	LogOffsets    map[string]*LogOffsets `protobuf:"bytes,3,rep,name=log_offsets,json=logOffsets,proto3" json:"log_offsets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Welcome) Reset() {
@@ -536,6 +752,595 @@ func (x *Welcome) GetMetricsIntervalSeconds() int32 {
 	return 0
 }
 
+func (x *Welcome) GetLogOffsets() map[string]*LogOffsets {
+	if x != nil {
+		return x.LogOffsets
+	}
+	return nil
+}
+
+type LogOffsets struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Stdout        int64                  `protobuf:"varint,1,opt,name=stdout,proto3" json:"stdout,omitempty"`
+	Stderr        int64                  `protobuf:"varint,2,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogOffsets) Reset() {
+	*x = LogOffsets{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogOffsets) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogOffsets) ProtoMessage() {}
+
+func (x *LogOffsets) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogOffsets.ProtoReflect.Descriptor instead.
+func (*LogOffsets) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *LogOffsets) GetStdout() int64 {
+	if x != nil {
+		return x.Stdout
+	}
+	return 0
+}
+
+func (x *LogOffsets) GetStderr() int64 {
+	if x != nil {
+		return x.Stderr
+	}
+	return 0
+}
+
+type GPUAssignment struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Index         int32                  `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	Vendor        string                 `protobuf:"bytes,3,opt,name=vendor,proto3" json:"vendor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GPUAssignment) Reset() {
+	*x = GPUAssignment{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GPUAssignment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GPUAssignment) ProtoMessage() {}
+
+func (x *GPUAssignment) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GPUAssignment.ProtoReflect.Descriptor instead.
+func (*GPUAssignment) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GPUAssignment) GetIndex() int32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *GPUAssignment) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *GPUAssignment) GetVendor() string {
+	if x != nil {
+		return x.Vendor
+	}
+	return ""
+}
+
+// TaskSpec is everything a worker needs to run one attempt of a task.
+type TaskSpec struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Command        string                 `protobuf:"bytes,1,opt,name=command,proto3" json:"command,omitempty"` // run with /bin/sh -c; {i} already substituted
+	Env            map[string]string      `protobuf:"bytes,2,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Cpus           float64                `protobuf:"fixed64,3,opt,name=cpus,proto3" json:"cpus,omitempty"`
+	MemoryBytes    uint64                 `protobuf:"varint,4,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"` // 0 = no limit
+	Gpus           []*GPUAssignment       `protobuf:"bytes,5,rep,name=gpus,proto3" json:"gpus,omitempty"`
+	TimeoutSeconds int64                  `protobuf:"varint,6,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // 0 = no timeout
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TaskSpec) Reset() {
+	*x = TaskSpec{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskSpec) ProtoMessage() {}
+
+func (x *TaskSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskSpec.ProtoReflect.Descriptor instead.
+func (*TaskSpec) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TaskSpec) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *TaskSpec) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetCpus() float64 {
+	if x != nil {
+		return x.Cpus
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetMemoryBytes() uint64 {
+	if x != nil {
+		return x.MemoryBytes
+	}
+	return 0
+}
+
+func (x *TaskSpec) GetGpus() []*GPUAssignment {
+	if x != nil {
+		return x.Gpus
+	}
+	return nil
+}
+
+func (x *TaskSpec) GetTimeoutSeconds() int64 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+type AssignTask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AttemptId     string                 `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	JobId         string                 `protobuf:"bytes,3,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Attempt       int32                  `protobuf:"varint,4,opt,name=attempt,proto3" json:"attempt,omitempty"` // 1 for the first attempt
+	ArrayIndex    int64                  `protobuf:"varint,5,opt,name=array_index,json=arrayIndex,proto3" json:"array_index,omitempty"`
+	Spec          *TaskSpec              `protobuf:"bytes,6,opt,name=spec,proto3" json:"spec,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AssignTask) Reset() {
+	*x = AssignTask{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AssignTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AssignTask) ProtoMessage() {}
+
+func (x *AssignTask) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AssignTask.ProtoReflect.Descriptor instead.
+func (*AssignTask) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AssignTask) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *AssignTask) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *AssignTask) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *AssignTask) GetAttempt() int32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *AssignTask) GetArrayIndex() int64 {
+	if x != nil {
+		return x.ArrayIndex
+	}
+	return 0
+}
+
+func (x *AssignTask) GetSpec() *TaskSpec {
+	if x != nil {
+		return x.Spec
+	}
+	return nil
+}
+
+type CancelTask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AttemptId     string                 `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelTask) Reset() {
+	*x = CancelTask{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelTask) ProtoMessage() {}
+
+func (x *CancelTask) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelTask.ProtoReflect.Descriptor instead.
+func (*CancelTask) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CancelTask) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *CancelTask) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+// ResultAck tells the worker it may delete its buffered result.
+type ResultAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AttemptId     string                 `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResultAck) Reset() {
+	*x = ResultAck{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResultAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResultAck) ProtoMessage() {}
+
+func (x *ResultAck) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResultAck.ProtoReflect.Descriptor instead.
+func (*ResultAck) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ResultAck) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+type TaskStarted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AttemptId     string                 `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	StartedUnixMs int64                  `protobuf:"varint,2,opt,name=started_unix_ms,json=startedUnixMs,proto3" json:"started_unix_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskStarted) Reset() {
+	*x = TaskStarted{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskStarted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskStarted) ProtoMessage() {}
+
+func (x *TaskStarted) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskStarted.ProtoReflect.Descriptor instead.
+func (*TaskStarted) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *TaskStarted) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *TaskStarted) GetStartedUnixMs() int64 {
+	if x != nil {
+		return x.StartedUnixMs
+	}
+	return 0
+}
+
+type LogChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AttemptId     string                 `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	Stream        Stream                 `protobuf:"varint,2,opt,name=stream,proto3,enum=cluster.v1.Stream" json:"stream,omitempty"`
+	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"` // byte offset of data within the stream
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogChunk) Reset() {
+	*x = LogChunk{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogChunk) ProtoMessage() {}
+
+func (x *LogChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogChunk.ProtoReflect.Descriptor instead.
+func (*LogChunk) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *LogChunk) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *LogChunk) GetStream() Stream {
+	if x != nil {
+		return x.Stream
+	}
+	return Stream_STREAM_UNSPECIFIED
+}
+
+func (x *LogChunk) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *LogChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type TaskResult struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	AttemptId      string                 `protobuf:"bytes,1,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	Outcome        TaskResult_Outcome     `protobuf:"varint,2,opt,name=outcome,proto3,enum=cluster.v1.TaskResult_Outcome" json:"outcome,omitempty"`
+	ExitCode       int32                  `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Error          string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	StartedUnixMs  int64                  `protobuf:"varint,5,opt,name=started_unix_ms,json=startedUnixMs,proto3" json:"started_unix_ms,omitempty"`
+	FinishedUnixMs int64                  `protobuf:"varint,6,opt,name=finished_unix_ms,json=finishedUnixMs,proto3" json:"finished_unix_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TaskResult) Reset() {
+	*x = TaskResult{}
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskResult) ProtoMessage() {}
+
+func (x *TaskResult) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskResult.ProtoReflect.Descriptor instead.
+func (*TaskResult) Descriptor() ([]byte, []int) {
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *TaskResult) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *TaskResult) GetOutcome() TaskResult_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return TaskResult_OUTCOME_UNSPECIFIED
+}
+
+func (x *TaskResult) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *TaskResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *TaskResult) GetStartedUnixMs() int64 {
+	if x != nil {
+		return x.StartedUnixMs
+	}
+	return 0
+}
+
+func (x *TaskResult) GetFinishedUnixMs() int64 {
+	if x != nil {
+		return x.FinishedUnixMs
+	}
+	return 0
+}
+
 // Ping/Pong let the controller measure round-trip latency to each node.
 type Ping struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -546,7 +1351,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[6]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -558,7 +1363,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[6]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -571,7 +1376,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{6}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Ping) GetNonce() int64 {
@@ -590,7 +1395,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[7]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +1407,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[7]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +1420,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{7}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Pong) GetNonce() int64 {
@@ -653,7 +1458,7 @@ type HardwareInfo struct {
 
 func (x *HardwareInfo) Reset() {
 	*x = HardwareInfo{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[8]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -665,7 +1470,7 @@ func (x *HardwareInfo) String() string {
 func (*HardwareInfo) ProtoMessage() {}
 
 func (x *HardwareInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[8]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -678,7 +1483,7 @@ func (x *HardwareInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HardwareInfo.ProtoReflect.Descriptor instead.
 func (*HardwareInfo) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{8}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *HardwareInfo) GetHostname() string {
@@ -813,7 +1618,7 @@ type Disk struct {
 
 func (x *Disk) Reset() {
 	*x = Disk{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[9]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -825,7 +1630,7 @@ func (x *Disk) String() string {
 func (*Disk) ProtoMessage() {}
 
 func (x *Disk) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[9]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -838,7 +1643,7 @@ func (x *Disk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Disk.ProtoReflect.Descriptor instead.
 func (*Disk) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{9}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Disk) GetMount() string {
@@ -890,7 +1695,7 @@ type GPU struct {
 
 func (x *GPU) Reset() {
 	*x = GPU{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[10]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -902,7 +1707,7 @@ func (x *GPU) String() string {
 func (*GPU) ProtoMessage() {}
 
 func (x *GPU) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[10]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -915,7 +1720,7 @@ func (x *GPU) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GPU.ProtoReflect.Descriptor instead.
 func (*GPU) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{10}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GPU) GetIndex() int32 {
@@ -981,7 +1786,7 @@ type Metrics struct {
 
 func (x *Metrics) Reset() {
 	*x = Metrics{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[11]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -993,7 +1798,7 @@ func (x *Metrics) String() string {
 func (*Metrics) ProtoMessage() {}
 
 func (x *Metrics) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[11]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1006,7 +1811,7 @@ func (x *Metrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metrics.ProtoReflect.Descriptor instead.
 func (*Metrics) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{11}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Metrics) GetTimeUnixMs() int64 {
@@ -1111,7 +1916,7 @@ type DiskUsage struct {
 
 func (x *DiskUsage) Reset() {
 	*x = DiskUsage{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[12]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1123,7 +1928,7 @@ func (x *DiskUsage) String() string {
 func (*DiskUsage) ProtoMessage() {}
 
 func (x *DiskUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[12]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1136,7 +1941,7 @@ func (x *DiskUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskUsage.ProtoReflect.Descriptor instead.
 func (*DiskUsage) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{12}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DiskUsage) GetMount() string {
@@ -1174,7 +1979,7 @@ type GPUMetrics struct {
 
 func (x *GPUMetrics) Reset() {
 	*x = GPUMetrics{}
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[13]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1186,7 +1991,7 @@ func (x *GPUMetrics) String() string {
 func (*GPUMetrics) ProtoMessage() {}
 
 func (x *GPUMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_clusterpb_cluster_proto_msgTypes[13]
+	mi := &file_internal_clusterpb_cluster_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1199,7 +2004,7 @@ func (x *GPUMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GPUMetrics.ProtoReflect.Descriptor instead.
 func (*GPUMetrics) Descriptor() ([]byte, []int) {
-	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{13}
+	return file_internal_clusterpb_cluster_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *GPUMetrics) GetIndex() int32 {
@@ -1264,29 +2069,105 @@ const file_internal_clusterpb_cluster_proto_rawDesc = "" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bAPPROVED\x10\x01\x12\v\n" +
-	"\aPENDING\x10\x02\"\x9a\x01\n" +
+	"\aPENDING\x10\x02\"\xb4\x02\n" +
 	"\rWorkerMessage\x12)\n" +
 	"\x05hello\x18\x01 \x01(\v2\x11.cluster.v1.HelloH\x00R\x05hello\x12/\n" +
 	"\ametrics\x18\x02 \x01(\v2\x13.cluster.v1.MetricsH\x00R\ametrics\x12&\n" +
-	"\x04pong\x18\x03 \x01(\v2\x10.cluster.v1.PongH\x00R\x04pongB\x05\n" +
-	"\x03msg\"s\n" +
+	"\x04pong\x18\x03 \x01(\v2\x10.cluster.v1.PongH\x00R\x04pong\x12<\n" +
+	"\ftask_started\x18\x04 \x01(\v2\x17.cluster.v1.TaskStartedH\x00R\vtaskStarted\x12(\n" +
+	"\x03log\x18\x05 \x01(\v2\x14.cluster.v1.LogChunkH\x00R\x03log\x120\n" +
+	"\x06result\x18\x06 \x01(\v2\x16.cluster.v1.TaskResultH\x00R\x06resultB\x05\n" +
+	"\x03msg\"\x8f\x02\n" +
 	"\x11ControllerMessage\x12/\n" +
 	"\awelcome\x18\x01 \x01(\v2\x13.cluster.v1.WelcomeH\x00R\awelcome\x12&\n" +
-	"\x04ping\x18\x02 \x01(\v2\x10.cluster.v1.PingH\x00R\x04pingB\x05\n" +
-	"\x03msg\"\xaa\x02\n" +
+	"\x04ping\x18\x02 \x01(\v2\x10.cluster.v1.PingH\x00R\x04ping\x120\n" +
+	"\x06assign\x18\x03 \x01(\v2\x16.cluster.v1.AssignTaskH\x00R\x06assign\x120\n" +
+	"\x06cancel\x18\x04 \x01(\v2\x16.cluster.v1.CancelTaskH\x00R\x06cancel\x126\n" +
+	"\n" +
+	"result_ack\x18\x05 \x01(\v2\x15.cluster.v1.ResultAckH\x00R\tresultAckB\x05\n" +
+	"\x03msg\"\xd5\x02\n" +
 	"\x05Hello\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x124\n" +
 	"\bhardware\x18\x02 \x01(\v2\x18.cluster.v1.HardwareInfoR\bhardware\x12\x1a\n" +
 	"\blocation\x18\x03 \x01(\tR\blocation\x12\x1c\n" +
 	"\tephemeral\x18\x04 \x01(\bR\tephemeral\x125\n" +
 	"\x06labels\x18\x05 \x03(\v2\x1d.cluster.v1.Hello.LabelsEntryR\x06labels\x12%\n" +
-	"\x0eshared_storage\x18\x06 \x01(\tR\rsharedStorage\x1a9\n" +
+	"\x0eshared_storage\x18\x06 \x01(\tR\rsharedStorage\x12)\n" +
+	"\x10running_attempts\x18\a \x03(\tR\x0frunningAttempts\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\\\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf9\x01\n" +
 	"\aWelcome\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x128\n" +
-	"\x18metrics_interval_seconds\x18\x02 \x01(\x05R\x16metricsIntervalSeconds\"\x1c\n" +
+	"\x18metrics_interval_seconds\x18\x02 \x01(\x05R\x16metricsIntervalSeconds\x12D\n" +
+	"\vlog_offsets\x18\x03 \x03(\v2#.cluster.v1.Welcome.LogOffsetsEntryR\n" +
+	"logOffsets\x1aU\n" +
+	"\x0fLogOffsetsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.cluster.v1.LogOffsetsR\x05value:\x028\x01\"<\n" +
+	"\n" +
+	"LogOffsets\x12\x16\n" +
+	"\x06stdout\x18\x01 \x01(\x03R\x06stdout\x12\x16\n" +
+	"\x06stderr\x18\x02 \x01(\x03R\x06stderr\"Q\n" +
+	"\rGPUAssignment\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x16\n" +
+	"\x06vendor\x18\x03 \x01(\tR\x06vendor\"\x9c\x02\n" +
+	"\bTaskSpec\x12\x18\n" +
+	"\acommand\x18\x01 \x01(\tR\acommand\x12/\n" +
+	"\x03env\x18\x02 \x03(\v2\x1d.cluster.v1.TaskSpec.EnvEntryR\x03env\x12\x12\n" +
+	"\x04cpus\x18\x03 \x01(\x01R\x04cpus\x12!\n" +
+	"\fmemory_bytes\x18\x04 \x01(\x04R\vmemoryBytes\x12-\n" +
+	"\x04gpus\x18\x05 \x03(\v2\x19.cluster.v1.GPUAssignmentR\x04gpus\x12'\n" +
+	"\x0ftimeout_seconds\x18\x06 \x01(\x03R\x0etimeoutSeconds\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc0\x01\n" +
+	"\n" +
+	"AssignTask\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x01 \x01(\tR\tattemptId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12\x15\n" +
+	"\x06job_id\x18\x03 \x01(\tR\x05jobId\x12\x18\n" +
+	"\aattempt\x18\x04 \x01(\x05R\aattempt\x12\x1f\n" +
+	"\varray_index\x18\x05 \x01(\x03R\n" +
+	"arrayIndex\x12(\n" +
+	"\x04spec\x18\x06 \x01(\v2\x14.cluster.v1.TaskSpecR\x04spec\"C\n" +
+	"\n" +
+	"CancelTask\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x01 \x01(\tR\tattemptId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"*\n" +
+	"\tResultAck\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x01 \x01(\tR\tattemptId\"T\n" +
+	"\vTaskStarted\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x01 \x01(\tR\tattemptId\x12&\n" +
+	"\x0fstarted_unix_ms\x18\x02 \x01(\x03R\rstartedUnixMs\"\x81\x01\n" +
+	"\bLogChunk\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x01 \x01(\tR\tattemptId\x12*\n" +
+	"\x06stream\x18\x02 \x01(\x0e2\x12.cluster.v1.StreamR\x06stream\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\"\xd6\x02\n" +
+	"\n" +
+	"TaskResult\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x01 \x01(\tR\tattemptId\x128\n" +
+	"\aoutcome\x18\x02 \x01(\x0e2\x1e.cluster.v1.TaskResult.OutcomeR\aoutcome\x12\x1b\n" +
+	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12&\n" +
+	"\x0fstarted_unix_ms\x18\x05 \x01(\x03R\rstartedUnixMs\x12(\n" +
+	"\x10finished_unix_ms\x18\x06 \x01(\x03R\x0efinishedUnixMs\"j\n" +
+	"\aOutcome\x12\x17\n" +
+	"\x13OUTCOME_UNSPECIFIED\x10\x00\x12\n" +
+	"\n" +
+	"\x06EXITED\x10\x01\x12\x13\n" +
+	"\x0fFAILED_TO_START\x10\x02\x12\r\n" +
+	"\tTIMED_OUT\x10\x03\x12\f\n" +
+	"\bCANCELED\x10\x04\x12\b\n" +
+	"\x04LOST\x10\x05\"\x1c\n" +
 	"\x04Ping\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\x03R\x05nonce\"\x1c\n" +
 	"\x04Pong\x12\x14\n" +
@@ -1357,7 +2238,13 @@ const file_internal_clusterpb_cluster_proto_rawDesc = "" +
 	"\x12memory_total_bytes\x18\x04 \x01(\x04R\x10memoryTotalBytes\x12#\n" +
 	"\rtemperature_c\x18\x05 \x01(\x01R\ftemperatureC\x12\x1f\n" +
 	"\vpower_watts\x18\x06 \x01(\x01R\n" +
-	"powerWatts2\x91\x01\n" +
+	"powerWatts*8\n" +
+	"\x06Stream\x12\x16\n" +
+	"\x12STREAM_UNSPECIFIED\x10\x00\x12\n" +
+	"\n" +
+	"\x06STDOUT\x10\x01\x12\n" +
+	"\n" +
+	"\x06STDERR\x10\x022\x91\x01\n" +
 	"\vNodeService\x129\n" +
 	"\x04Join\x12\x17.cluster.v1.JoinRequest\x1a\x18.cluster.v1.JoinResponse\x12G\n" +
 	"\aConnect\x12\x19.cluster.v1.WorkerMessage\x1a\x1d.cluster.v1.ControllerMessage(\x010\x01B<Z:github.com/NTFespolion307/QuorvexFusion/internal/clusterpbb\x06proto3"
@@ -1374,48 +2261,74 @@ func file_internal_clusterpb_cluster_proto_rawDescGZIP() []byte {
 	return file_internal_clusterpb_cluster_proto_rawDescData
 }
 
-var file_internal_clusterpb_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_clusterpb_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_internal_clusterpb_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_internal_clusterpb_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_internal_clusterpb_cluster_proto_goTypes = []any{
-	(JoinResponse_Status)(0),  // 0: cluster.v1.JoinResponse.Status
-	(*JoinRequest)(nil),       // 1: cluster.v1.JoinRequest
-	(*JoinResponse)(nil),      // 2: cluster.v1.JoinResponse
-	(*WorkerMessage)(nil),     // 3: cluster.v1.WorkerMessage
-	(*ControllerMessage)(nil), // 4: cluster.v1.ControllerMessage
-	(*Hello)(nil),             // 5: cluster.v1.Hello
-	(*Welcome)(nil),           // 6: cluster.v1.Welcome
-	(*Ping)(nil),              // 7: cluster.v1.Ping
-	(*Pong)(nil),              // 8: cluster.v1.Pong
-	(*HardwareInfo)(nil),      // 9: cluster.v1.HardwareInfo
-	(*Disk)(nil),              // 10: cluster.v1.Disk
-	(*GPU)(nil),               // 11: cluster.v1.GPU
-	(*Metrics)(nil),           // 12: cluster.v1.Metrics
-	(*DiskUsage)(nil),         // 13: cluster.v1.DiskUsage
-	(*GPUMetrics)(nil),        // 14: cluster.v1.GPUMetrics
-	nil,                       // 15: cluster.v1.Hello.LabelsEntry
+	(Stream)(0),               // 0: cluster.v1.Stream
+	(JoinResponse_Status)(0),  // 1: cluster.v1.JoinResponse.Status
+	(TaskResult_Outcome)(0),   // 2: cluster.v1.TaskResult.Outcome
+	(*JoinRequest)(nil),       // 3: cluster.v1.JoinRequest
+	(*JoinResponse)(nil),      // 4: cluster.v1.JoinResponse
+	(*WorkerMessage)(nil),     // 5: cluster.v1.WorkerMessage
+	(*ControllerMessage)(nil), // 6: cluster.v1.ControllerMessage
+	(*Hello)(nil),             // 7: cluster.v1.Hello
+	(*Welcome)(nil),           // 8: cluster.v1.Welcome
+	(*LogOffsets)(nil),        // 9: cluster.v1.LogOffsets
+	(*GPUAssignment)(nil),     // 10: cluster.v1.GPUAssignment
+	(*TaskSpec)(nil),          // 11: cluster.v1.TaskSpec
+	(*AssignTask)(nil),        // 12: cluster.v1.AssignTask
+	(*CancelTask)(nil),        // 13: cluster.v1.CancelTask
+	(*ResultAck)(nil),         // 14: cluster.v1.ResultAck
+	(*TaskStarted)(nil),       // 15: cluster.v1.TaskStarted
+	(*LogChunk)(nil),          // 16: cluster.v1.LogChunk
+	(*TaskResult)(nil),        // 17: cluster.v1.TaskResult
+	(*Ping)(nil),              // 18: cluster.v1.Ping
+	(*Pong)(nil),              // 19: cluster.v1.Pong
+	(*HardwareInfo)(nil),      // 20: cluster.v1.HardwareInfo
+	(*Disk)(nil),              // 21: cluster.v1.Disk
+	(*GPU)(nil),               // 22: cluster.v1.GPU
+	(*Metrics)(nil),           // 23: cluster.v1.Metrics
+	(*DiskUsage)(nil),         // 24: cluster.v1.DiskUsage
+	(*GPUMetrics)(nil),        // 25: cluster.v1.GPUMetrics
+	nil,                       // 26: cluster.v1.Hello.LabelsEntry
+	nil,                       // 27: cluster.v1.Welcome.LogOffsetsEntry
+	nil,                       // 28: cluster.v1.TaskSpec.EnvEntry
 }
 var file_internal_clusterpb_cluster_proto_depIdxs = []int32{
-	0,  // 0: cluster.v1.JoinResponse.status:type_name -> cluster.v1.JoinResponse.Status
-	5,  // 1: cluster.v1.WorkerMessage.hello:type_name -> cluster.v1.Hello
-	12, // 2: cluster.v1.WorkerMessage.metrics:type_name -> cluster.v1.Metrics
-	8,  // 3: cluster.v1.WorkerMessage.pong:type_name -> cluster.v1.Pong
-	6,  // 4: cluster.v1.ControllerMessage.welcome:type_name -> cluster.v1.Welcome
-	7,  // 5: cluster.v1.ControllerMessage.ping:type_name -> cluster.v1.Ping
-	9,  // 6: cluster.v1.Hello.hardware:type_name -> cluster.v1.HardwareInfo
-	15, // 7: cluster.v1.Hello.labels:type_name -> cluster.v1.Hello.LabelsEntry
-	10, // 8: cluster.v1.HardwareInfo.disks:type_name -> cluster.v1.Disk
-	11, // 9: cluster.v1.HardwareInfo.gpus:type_name -> cluster.v1.GPU
-	13, // 10: cluster.v1.Metrics.disks:type_name -> cluster.v1.DiskUsage
-	14, // 11: cluster.v1.Metrics.gpus:type_name -> cluster.v1.GPUMetrics
-	1,  // 12: cluster.v1.NodeService.Join:input_type -> cluster.v1.JoinRequest
-	3,  // 13: cluster.v1.NodeService.Connect:input_type -> cluster.v1.WorkerMessage
-	2,  // 14: cluster.v1.NodeService.Join:output_type -> cluster.v1.JoinResponse
-	4,  // 15: cluster.v1.NodeService.Connect:output_type -> cluster.v1.ControllerMessage
-	14, // [14:16] is the sub-list for method output_type
-	12, // [12:14] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	1,  // 0: cluster.v1.JoinResponse.status:type_name -> cluster.v1.JoinResponse.Status
+	7,  // 1: cluster.v1.WorkerMessage.hello:type_name -> cluster.v1.Hello
+	23, // 2: cluster.v1.WorkerMessage.metrics:type_name -> cluster.v1.Metrics
+	19, // 3: cluster.v1.WorkerMessage.pong:type_name -> cluster.v1.Pong
+	15, // 4: cluster.v1.WorkerMessage.task_started:type_name -> cluster.v1.TaskStarted
+	16, // 5: cluster.v1.WorkerMessage.log:type_name -> cluster.v1.LogChunk
+	17, // 6: cluster.v1.WorkerMessage.result:type_name -> cluster.v1.TaskResult
+	8,  // 7: cluster.v1.ControllerMessage.welcome:type_name -> cluster.v1.Welcome
+	18, // 8: cluster.v1.ControllerMessage.ping:type_name -> cluster.v1.Ping
+	12, // 9: cluster.v1.ControllerMessage.assign:type_name -> cluster.v1.AssignTask
+	13, // 10: cluster.v1.ControllerMessage.cancel:type_name -> cluster.v1.CancelTask
+	14, // 11: cluster.v1.ControllerMessage.result_ack:type_name -> cluster.v1.ResultAck
+	20, // 12: cluster.v1.Hello.hardware:type_name -> cluster.v1.HardwareInfo
+	26, // 13: cluster.v1.Hello.labels:type_name -> cluster.v1.Hello.LabelsEntry
+	27, // 14: cluster.v1.Welcome.log_offsets:type_name -> cluster.v1.Welcome.LogOffsetsEntry
+	28, // 15: cluster.v1.TaskSpec.env:type_name -> cluster.v1.TaskSpec.EnvEntry
+	10, // 16: cluster.v1.TaskSpec.gpus:type_name -> cluster.v1.GPUAssignment
+	11, // 17: cluster.v1.AssignTask.spec:type_name -> cluster.v1.TaskSpec
+	0,  // 18: cluster.v1.LogChunk.stream:type_name -> cluster.v1.Stream
+	2,  // 19: cluster.v1.TaskResult.outcome:type_name -> cluster.v1.TaskResult.Outcome
+	21, // 20: cluster.v1.HardwareInfo.disks:type_name -> cluster.v1.Disk
+	22, // 21: cluster.v1.HardwareInfo.gpus:type_name -> cluster.v1.GPU
+	24, // 22: cluster.v1.Metrics.disks:type_name -> cluster.v1.DiskUsage
+	25, // 23: cluster.v1.Metrics.gpus:type_name -> cluster.v1.GPUMetrics
+	9,  // 24: cluster.v1.Welcome.LogOffsetsEntry.value:type_name -> cluster.v1.LogOffsets
+	3,  // 25: cluster.v1.NodeService.Join:input_type -> cluster.v1.JoinRequest
+	5,  // 26: cluster.v1.NodeService.Connect:input_type -> cluster.v1.WorkerMessage
+	4,  // 27: cluster.v1.NodeService.Join:output_type -> cluster.v1.JoinResponse
+	6,  // 28: cluster.v1.NodeService.Connect:output_type -> cluster.v1.ControllerMessage
+	27, // [27:29] is the sub-list for method output_type
+	25, // [25:27] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_internal_clusterpb_cluster_proto_init() }
@@ -1427,18 +2340,24 @@ func file_internal_clusterpb_cluster_proto_init() {
 		(*WorkerMessage_Hello)(nil),
 		(*WorkerMessage_Metrics)(nil),
 		(*WorkerMessage_Pong)(nil),
+		(*WorkerMessage_TaskStarted)(nil),
+		(*WorkerMessage_Log)(nil),
+		(*WorkerMessage_Result)(nil),
 	}
 	file_internal_clusterpb_cluster_proto_msgTypes[3].OneofWrappers = []any{
 		(*ControllerMessage_Welcome)(nil),
 		(*ControllerMessage_Ping)(nil),
+		(*ControllerMessage_Assign)(nil),
+		(*ControllerMessage_Cancel)(nil),
+		(*ControllerMessage_ResultAck)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_clusterpb_cluster_proto_rawDesc), len(file_internal_clusterpb_cluster_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   15,
+			NumEnums:      3,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -130,7 +130,43 @@ type APIError struct {
 	Message string
 }
 
-func (e *APIError) Error() string { return fmt.Sprintf("controller: %s (HTTP %d)", e.Message, e.Status) }
+func (e *APIError) Error() string {
+	return fmt.Sprintf("controller: %s (HTTP %d)", e.Message, e.Status)
+}
+
+// Raw performs a request and returns the raw body and headers (used for
+// log streaming).
+func (c *Client) Raw(ctx context.Context, method, path string) ([]byte, http.Header, error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, c.cfg.Controller+path, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if c.cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	if resp.StatusCode >= 300 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(body, &e)
+		if e.Error == "" {
+			e.Error = resp.Status
+		}
+		return nil, nil, &APIError{Status: resp.StatusCode, Message: e.Error}
+	}
+	return body, resp.Header, nil
+}
 
 // Do sends a JSON request and decodes a JSON response into out (if non-nil).
 func (c *Client) Do(ctx context.Context, method, path string, in, out any) error {

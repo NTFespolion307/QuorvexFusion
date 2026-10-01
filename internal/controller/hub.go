@@ -45,7 +45,7 @@ func newSession(ctx context.Context, nodeID, remote string, hello *pb.Hello) *Se
 	return &Session{
 		NodeID: nodeID, RemoteAddr: remote, ConnectedAt: now,
 		ctx: ctx, cancel: cancel,
-		send:     make(chan *pb.ControllerMessage, 256),
+		send:     make(chan *pb.ControllerMessage, 1024),
 		hello:    hello,
 		lastSeen: now,
 		pings:    map[int64]time.Time{},
@@ -60,6 +60,21 @@ func (s *Session) Send(msg *pb.ControllerMessage) bool {
 	case s.send <- msg:
 		return true
 	case <-s.ctx.Done():
+		return false
+	}
+}
+
+// TrySend queues a message without blocking. If the worker is so far
+// behind that the queue is full, the session is closed: the worker will
+// reconnect and resynchronise. Used while holding the task manager lock.
+func (s *Session) TrySend(msg *pb.ControllerMessage) bool {
+	select {
+	case s.send <- msg:
+		return true
+	case <-s.ctx.Done():
+		return false
+	default:
+		s.Close(errors.New("send queue full"))
 		return false
 	}
 }

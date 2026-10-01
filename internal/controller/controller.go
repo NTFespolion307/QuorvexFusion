@@ -30,6 +30,7 @@ type Controller struct {
 	ca     *pki.CA
 	hub    *Hub
 	events *events
+	tm     *taskManager
 
 	joinMu sync.Mutex
 }
@@ -44,7 +45,15 @@ func New(cfg *Config, log *slog.Logger) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Controller{cfg: cfg, log: log, store: st, ca: ca, hub: NewHub(), events: newEvents()}, nil
+	c := &Controller{
+		cfg: cfg, log: log, store: st, ca: ca, hub: NewHub(), events: newEvents(),
+		tm: newTaskManager(cfg.path("logs")),
+	}
+	if err := c.restoreReservations(); err != nil {
+		st.Close()
+		return nil, fmt.Errorf("restore running tasks: %w", err)
+	}
+	return c, nil
 }
 
 func (c *Controller) Config() *Config     { return c.cfg }
@@ -130,6 +139,7 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	go func() { errc <- grpcServer.Serve(nodeLn) }()
 	go func() { errc <- httpServer.ServeTLS(httpLn, "", "") }()
 	go c.persistLastSeen(ctx)
+	go c.schedulerLoop(ctx)
 
 	select {
 	case <-ctx.Done():

@@ -159,6 +159,9 @@ func (c *Controller) RevokeNode(id string) error {
 		return err
 	}
 	c.hub.Disconnect(id, errRevoked)
+	c.tm.mu.Lock()
+	c.loseNodeAttemptsLocked(id, "node revoked")
+	c.tm.mu.Unlock()
 	c.log.Info("node revoked", "node", id)
 	c.events.publish("nodes")
 	return nil
@@ -201,6 +204,7 @@ type NodeView struct {
 	LastSeen      *time.Time        `json:"last_seen,omitempty"`
 	Hardware      *pb.HardwareInfo  `json:"hardware,omitempty"`
 	Metrics       *pb.Metrics       `json:"metrics,omitempty"`
+	Used          Resources         `json:"used"` // reserved by tasks on this node
 }
 
 func (c *Controller) nodeView(n *store.Node) *NodeView {
@@ -237,9 +241,14 @@ func (c *Controller) ListNodeViews() ([]*NodeView, error) {
 	if err != nil {
 		return nil, err
 	}
+	used := c.usedResources()
 	out := make([]*NodeView, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, c.nodeView(n))
+		v := c.nodeView(n)
+		if u := used[n.ID]; u != nil {
+			v.Used = *u
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }
@@ -249,7 +258,11 @@ func (c *Controller) NodeView(id string) (*NodeView, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.nodeView(n), nil
+	v := c.nodeView(n)
+	if u := c.usedResources()[id]; u != nil {
+		v.Used = *u
+	}
+	return v, nil
 }
 
 // NodeHistory returns the node's recent metrics, oldest first.
@@ -267,15 +280,27 @@ type Resources struct {
 	GPUs        int     `json:"gpus"`
 }
 
-// PoolSummary describes the whole cluster's capacity.
+// PoolSummary describes the whole cluster's capacity and usage.
 type PoolSummary struct {
-	NodesOnline  int                   `json:"nodes_online"`
-	NodesOffline int                   `json:"nodes_offline"`
-	NodesPending int                   `json:"nodes_pending"`
-	Total        Resources             `json:"total"`
-	Used         Resources             `json:"used"`
-	ByLocation   map[string]*Resources `json:"by_location"`
-	Locations    []string              `json:"locations"`
+	NodesOnline  int                      `json:"nodes_online"`
+	NodesOffline int                      `json:"nodes_offline"`
+	NodesPending int                      `json:"nodes_pending"`
+	Total        Resources                `json:"total"` // online nodes only
+	Used         Resources                `json:"used"`  // reserved by running tasks
+	ByLocation   map[string]*LocationPool `json:"by_location"`
+	Locations    []string                 `json:"locations"`
+	Tasks        store.TaskCounts         `json:"tasks"` // queued/assigned/running across all jobs
+}
+
+type LocationPool struct {
+	Total Resources `json:"total"`
+	Used  Resources `json:"used"`
+}
+
+func (r *Resources) add(o Resources) {
+	r.CPUs += o.CPUs
+	r.MemoryBytes += o.MemoryBytes
+	r.GPUs += o.GPUs
 }
 
 func (c *Controller) Pool() (*PoolSummary, error) {
@@ -283,7 +308,7 @@ func (c *Controller) Pool() (*PoolSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &PoolSummary{ByLocation: map[string]*Resources{}}
+	p := &PoolSummary{ByLocation: map[string]*LocationPool{}}
 	for _, v := range views {
 		switch v.Status {
 		case "pending":
@@ -295,28 +320,29 @@ func (c *Controller) Pool() (*PoolSummary, error) {
 			if v.Hardware == nil {
 				continue
 			}
-			r := Resources{CPUs: v.Hardware.CpuLimit, MemoryBytes: v.Hardware.MemoryBytes, GPUs: len(v.Hardware.Gpus)}
-			p.Total.CPUs += r.CPUs
-			p.Total.MemoryBytes += r.MemoryBytes
-			p.Total.GPUs += r.GPUs
+			total := Resources{CPUs: v.Hardware.CpuLimit, MemoryBytes: v.Hardware.MemoryBytes, GPUs: len(v.Hardware.Gpus)}
+			p.Total.add(total)
+			p.Used.add(v.Used)
 			loc := v.Location
 			if loc == "" {
 				loc = "default"
 			}
 			l := p.ByLocation[loc]
 			if l == nil {
-				l = &Resources{}
+				l = &LocationPool{}
 				p.ByLocation[loc] = l
 			}
-			l.CPUs += r.CPUs
-			l.MemoryBytes += r.MemoryBytes
-			l.GPUs += r.GPUs
+			l.Total.add(total)
+			l.Used.add(v.Used)
 		}
 	}
 	for loc := range p.ByLocation {
 		p.Locations = append(p.Locations, loc)
 	}
 	sort.Strings(p.Locations)
+	if p.Tasks, err = c.store.GlobalTaskCounts(); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 

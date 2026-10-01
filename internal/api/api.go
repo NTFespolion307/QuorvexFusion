@@ -54,6 +54,16 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("PUT /api/v1/nodes/{id}/labels", s.setNodeLabels)
 	authed.HandleFunc("DELETE /api/v1/nodes/{id}", s.deleteNode)
 
+	authed.HandleFunc("POST /api/v1/jobs", s.submitJob)
+	authed.HandleFunc("GET /api/v1/jobs", s.listJobs)
+	authed.HandleFunc("GET /api/v1/jobs/{id}", s.getJob)
+	authed.HandleFunc("GET /api/v1/jobs/{id}/tasks", s.listJobTasks)
+	authed.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.cancelJob)
+	authed.HandleFunc("DELETE /api/v1/jobs/{id}", s.deleteJob)
+	authed.HandleFunc("GET /api/v1/tasks/{id}", s.getTask)
+	authed.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.cancelTask)
+	authed.HandleFunc("GET /api/v1/tasks/{id}/logs", s.taskLogs)
+
 	authed.HandleFunc("GET /api/v1/join-tokens", s.listJoinTokens)
 	authed.HandleFunc("POST /api/v1/join-tokens", s.createJoinToken)
 	authed.HandleFunc("DELETE /api/v1/join-tokens/{id}", s.revokeJoinToken)

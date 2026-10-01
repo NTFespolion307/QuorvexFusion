@@ -229,13 +229,25 @@ func (ns *nodeServer) Connect(stream pb.NodeService_ConnectServer) error {
 	}
 
 	sess := newSession(stream.Context(), nodeID, remote, hello)
-	c.hub.Register(sess)
-	c.log.Info("node online", "node", nodeID, "name", hello.Hardware.Hostname, "addr", remote, "version", hello.Version)
-	c.events.publish("nodes")
 
+	// Order matters here:
+	//  1. Reconcile attempts before the node is visible to the scheduler,
+	//     so a freshly placed task can't be mistaken for a lost one.
+	//  2. Queue Welcome before registering, so it is the first message the
+	//     worker receives (nothing else can be sent to an unregistered session).
+	offsets, stale := c.nodeConnected(nodeID, hello.RunningAttempts)
 	sess.Send(&pb.ControllerMessage{Msg: &pb.ControllerMessage_Welcome{Welcome: &pb.Welcome{
-		NodeId: nodeID, MetricsIntervalSeconds: int32(c.cfg.MetricsIntervalSec),
+		NodeId: nodeID, MetricsIntervalSeconds: int32(c.cfg.MetricsIntervalSec), LogOffsets: offsets,
 	}}})
+	for _, id := range stale {
+		sess.Send(&pb.ControllerMessage{Msg: &pb.ControllerMessage_Cancel{Cancel: &pb.CancelTask{
+			AttemptId: id, Reason: "attempt is no longer current (node was presumed lost)"}}})
+	}
+	c.hub.Register(sess)
+	c.log.Info("node online", "node", nodeID, "name", hello.Hardware.Hostname, "addr", remote,
+		"version", hello.Version, "adopted_tasks", len(offsets), "stale_tasks", len(stale))
+	c.events.publish("nodes")
+	c.kickScheduler()
 
 	// Sender: the only goroutine that calls stream.Send (gRPC streams do not
 	// allow concurrent sends).
@@ -269,6 +281,12 @@ func (ns *nodeServer) Connect(stream pb.NodeService_ConnectServer) error {
 				sess.recordMetrics(m.Metrics)
 			case *pb.WorkerMessage_Pong:
 				sess.recordPong(m.Pong)
+			case *pb.WorkerMessage_TaskStarted:
+				c.handleTaskStarted(nodeID, m.TaskStarted)
+			case *pb.WorkerMessage_Log:
+				c.handleLog(nodeID, m.Log)
+			case *pb.WorkerMessage_Result:
+				c.handleResult(sess, m.Result)
 			}
 		}
 	}()
@@ -302,6 +320,15 @@ func (ns *nodeServer) Connect(stream pb.NodeService_ConnectServer) error {
 		_ = c.store.TouchNode(nodeID, time.Now())
 		c.log.Info("node offline", "node", nodeID, "reason", cause)
 		c.events.publish("nodes")
+		if errors.Is(cause, errHeartbeat) {
+			// Already silent for a full heartbeat timeout: requeue now.
+			c.nodeLost(nodeID, "heartbeat timeout")
+		} else {
+			// The stream broke (network blip, worker restart): running tasks
+			// get one heartbeat timeout for the worker to reconnect and
+			// reclaim them.
+			c.nodeDisconnected(nodeID)
+		}
 	}
 	if errors.Is(cause, errRevoked) {
 		return status.Error(codes.PermissionDenied, "node revoked")
