@@ -291,6 +291,7 @@ func (ns *nodeServer) Connect(stream pb.NodeService_ConnectServer) error {
 			switch m := msg.Msg.(type) {
 			case *pb.WorkerMessage_Metrics:
 				sess.recordMetrics(m.Metrics)
+				c.publishMetrics()
 			case *pb.WorkerMessage_Pong:
 				sess.recordPong(m.Pong)
 			case *pb.WorkerMessage_TaskStarted:

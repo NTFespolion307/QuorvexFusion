@@ -39,7 +39,8 @@ type Node struct {
 }
 
 // EffectiveLabels merges worker-reported labels with admin labels (admin
-// wins) and adds the built-in "location" label.
+// wins) and adds the built-in "location" and "hostname" labels, so a job
+// can target one machine with --require hostname=NAME.
 func (n *Node) EffectiveLabels() map[string]string {
 	out := map[string]string{}
 	for k, v := range n.WorkerLabels {
@@ -52,6 +53,9 @@ func (n *Node) EffectiveLabels() map[string]string {
 		if _, ok := out["location"]; !ok {
 			out["location"] = n.Location
 		}
+	}
+	if _, ok := out["hostname"]; !ok && n.Name != "" {
+		out["hostname"] = n.Name
 	}
 	return out
 }

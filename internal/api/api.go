@@ -19,6 +19,7 @@ import (
 	"github.com/NTFespolion307/QuorvexFusion/internal/controller"
 	"github.com/NTFespolion307/QuorvexFusion/internal/ratelimit"
 	"github.com/NTFespolion307/QuorvexFusion/internal/store"
+	"github.com/NTFespolion307/QuorvexFusion/internal/web"
 )
 
 type Server struct {
@@ -36,15 +37,23 @@ func New(c *controller.Controller, log *slog.Logger) *Server {
 	}
 }
 
-// Handler returns the HTTP handler for the API (and, later, the web UI).
+// Handler returns the HTTP handler for the API and the web UI.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	// The only endpoints usable without credentials: logging in (both
+	// rate-limited) and, in package web, the login page itself.
 	mux.HandleFunc("POST /api/v1/login", s.login)
+	mux.HandleFunc("POST /api/v1/session", s.createSession)
+	web.Register(mux, s.HasSession)
 
 	authed := http.NewServeMux()
 	authed.HandleFunc("GET /api/v1/info", s.info)
 	authed.HandleFunc("GET /api/v1/status", s.status)
+	authed.HandleFunc("GET /api/v1/events", s.events)
+	authed.HandleFunc("GET /api/v1/pool/history", s.poolHistory)
+	authed.HandleFunc("DELETE /api/v1/session", s.deleteSession)
+	authed.HandleFunc("POST /api/v1/password", s.changePassword)
 
 	authed.HandleFunc("GET /api/v1/nodes", s.listNodes)
 	authed.HandleFunc("GET /api/v1/nodes/{id}", s.getNode)
@@ -52,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("POST /api/v1/nodes/{id}/approve", s.approveNode)
 	authed.HandleFunc("POST /api/v1/nodes/{id}/revoke", s.revokeNode)
 	authed.HandleFunc("PUT /api/v1/nodes/{id}/labels", s.setNodeLabels)
+	authed.HandleFunc("POST /api/v1/nodes/{id}/drain", s.drainNode)
 	authed.HandleFunc("DELETE /api/v1/nodes/{id}", s.deleteNode)
 
 	authed.HandleFunc("POST /api/v1/jobs", s.submitJob)
@@ -80,12 +90,21 @@ func (s *Server) Handler() http.Handler {
 
 type tokenKey struct{}
 
+// requireAuth accepts an API token (CLI, scripts) or a UI session cookie.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		tok, ok := strings.CutPrefix(auth, "Bearer ")
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "missing API token")
+			if s.HasSession(r) {
+				if !sameOrigin(r) {
+					writeError(w, http.StatusForbidden, "cross-origin request refused")
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+			writeError(w, http.StatusUnauthorized, "not logged in (missing API token or session)")
 			return
 		}
 		t, err := s.c.Store().CheckAPIToken(tok, time.Now())
@@ -104,6 +123,10 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
+		// The UI loads nothing from other origins. Inline styles are allowed
+		// because the charting library sets element styles.
+		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+			"img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
 }

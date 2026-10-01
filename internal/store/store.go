@@ -157,6 +157,15 @@ CREATE INDEX attempts_state ON attempts(state);
 	`
 CREATE INDEX join_tokens_secret ON join_tokens(secret_hash);
 `,
+	// 4: web UI login sessions
+	`
+CREATE TABLE sessions (
+	id_hash    TEXT PRIMARY KEY,   -- SHA-256 of the cookie value
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL,
+	ip         TEXT NOT NULL DEFAULT ''
+);
+`,
 }
 
 func (s *Store) migrate() error {

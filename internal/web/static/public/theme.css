@@ -1,0 +1,121 @@
+/*
+ * Theme: every color used by the UI is defined here, once per theme.
+ * Components (base.css) and charts (js/charts.js) only use these variables.
+ *
+ * The theme follows the OS preference unless the user picks one, which
+ * sets data-theme="light" or "dark" on <html>.
+ */
+
+:root {
+  /* dark (default) */
+  --bg: #0f1216;
+  --bg-elev: #171b21;
+  --bg-elev-2: #1e232b;
+  --bg-sunken: #0b0d10;
+  --border: #2a3039;
+  --border-strong: #3a424e;
+  --text: #e6e9ee;
+  --text-dim: #9aa4b2;
+  --text-faint: #6b7583;
+  --accent: #5b9dff;
+  --accent-hover: #7cb1ff;
+  --accent-text: #0b1220;
+  --accent-soft: rgba(91, 157, 255, 0.14);
+  --ok: #3ecf8e;
+  --ok-soft: rgba(62, 207, 142, 0.14);
+  --warn: #f5b84b;
+  --warn-soft: rgba(245, 184, 75, 0.14);
+  --err: #f26d6d;
+  --err-soft: rgba(242, 109, 109, 0.14);
+  --info: #a78bfa;
+  --info-soft: rgba(167, 139, 250, 0.14);
+  --bar-bg: #262c35;
+  --code-bg: #0b0d10;
+  --code-text: #d4dae3;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.25);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --chart-grid: #232933;
+  --chart-1: #5b9dff;
+  --chart-2: #3ecf8e;
+  --chart-3: #f5b84b;
+  --chart-4: #a78bfa;
+  --chart-5: #f26d6d;
+  --chart-6: #2dd4bf;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f7fa;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #f0f3f7;
+    --bg-sunken: #e9edf2;
+    --border: #dde2e9;
+    --border-strong: #c5ccd6;
+    --text: #18202b;
+    --text-dim: #566170;
+    --text-faint: #8590a0;
+    --accent: #2563eb;
+    --accent-hover: #1d4fd0;
+    --accent-text: #ffffff;
+    --accent-soft: rgba(37, 99, 235, 0.10);
+    --ok: #0f9d63;
+    --ok-soft: rgba(15, 157, 99, 0.12);
+    --warn: #b7791f;
+    --warn-soft: rgba(183, 121, 31, 0.12);
+    --err: #d23c3c;
+    --err-soft: rgba(210, 60, 60, 0.10);
+    --info: #7c3aed;
+    --info-soft: rgba(124, 58, 237, 0.10);
+    --bar-bg: #e4e8ee;
+    --code-bg: #10151c;
+    --code-text: #d4dae3;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.06);
+    --overlay: rgba(16, 24, 40, 0.45);
+    --chart-grid: #e6eaf0;
+    --chart-1: #2563eb;
+    --chart-2: #0f9d63;
+    --chart-3: #d08a14;
+    --chart-4: #7c3aed;
+    --chart-5: #d23c3c;
+    --chart-6: #0d9488;
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #f5f7fa;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #f0f3f7;
+  --bg-sunken: #e9edf2;
+  --border: #dde2e9;
+  --border-strong: #c5ccd6;
+  --text: #18202b;
+  --text-dim: #566170;
+  --text-faint: #8590a0;
+  --accent: #2563eb;
+  --accent-hover: #1d4fd0;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(37, 99, 235, 0.10);
+  --ok: #0f9d63;
+  --ok-soft: rgba(15, 157, 99, 0.12);
+  --warn: #b7791f;
+  --warn-soft: rgba(183, 121, 31, 0.12);
+  --err: #d23c3c;
+  --err-soft: rgba(210, 60, 60, 0.10);
+  --info: #7c3aed;
+  --info-soft: rgba(124, 58, 237, 0.10);
+  --bar-bg: #e4e8ee;
+  --code-bg: #10151c;
+  --code-text: #d4dae3;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 4px 16px rgba(16, 24, 40, 0.06);
+  --overlay: rgba(16, 24, 40, 0.45);
+  --chart-grid: #e6eaf0;
+  --chart-1: #2563eb;
+  --chart-2: #0f9d63;
+  --chart-3: #d08a14;
+  --chart-4: #7c3aed;
+  --chart-5: #d23c3c;
+  --chart-6: #0d9488;
+  color-scheme: light;
+}

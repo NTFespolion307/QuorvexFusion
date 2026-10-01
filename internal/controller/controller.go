@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -35,8 +36,10 @@ type Controller struct {
 	events *events
 	tm     *taskManager
 
-	joinMu          sync.Mutex
-	stopAdvertising func()
+	joinMu           sync.Mutex
+	stopAdvertising  func()
+	history          poolHistory
+	lastMetricsEvent atomic.Int64 // unix ms of the last "metrics" UI event
 }
 
 // New loads the CA and opens the database of an initialised data dir.
@@ -147,6 +150,7 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	}
 	go c.persistLastSeen(ctx)
 	go c.schedulerLoop(ctx)
+	go c.poolSampler(ctx)
 
 	select {
 	case <-ctx.Done():

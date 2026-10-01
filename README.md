@@ -12,8 +12,8 @@ pool are scheduled onto them automatically.
 
 > **Status:** under active development. Working today: joining nodes,
 > hardware/metrics reporting, scheduling, shell jobs, array jobs, retries,
-> timeouts, live logs, cgroup limits, the installer and LAN discovery.
-> Coming next: web UI, file transfer, Docker/GPU tasks, ephemeral node
+> timeouts, live logs, cgroup limits, the installer, LAN discovery and the
+> web UI. Coming next: file transfer, Docker/GPU tasks, ephemeral node
 > cleanup, release binaries.
 
 ## Quick start
@@ -87,6 +87,22 @@ own GPUs.
 
 To use the CLI from another computer:
 `cluster login --controller CONTROLLER_IP:8443` (asks for the admin password).
+
+## Web UI
+
+Open `https://CONTROLLER_IP:8443` and sign in with the admin password.
+
+- **Dashboard**: pool size and usage, nodes and tasks, CPU/GPU charts by location.
+- **Nodes**: live usage per machine; approve, drain, revoke and label nodes.
+  Click a node for its hardware and live charts (per-core CPU, memory, network, GPUs).
+- **Jobs**: submit jobs, follow progress, read live task output, cancel.
+- **Join tokens**: create join codes for new machines.
+- **Settings**: admin password, API tokens, the CA certificate.
+
+The browser warns about the certificate because it is signed by the cluster's
+own CA. Accept it once, or remove the warning for good by importing the CA
+certificate (Settings → Download CA certificate) into your browser or OS
+trust store.
 
 ## Managing the installation
 

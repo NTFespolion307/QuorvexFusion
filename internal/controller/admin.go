@@ -207,7 +207,8 @@ type NodeView struct {
 	Location      string            `json:"location"`
 	Ephemeral     bool              `json:"ephemeral"`
 	Draining      bool              `json:"draining"`
-	Labels        map[string]string `json:"labels"`
+	Labels        map[string]string `json:"labels"`       // effective: worker + admin + built-in
+	AdminLabels   map[string]string `json:"admin_labels"` // set in the UI/CLI; override worker labels
 	Addr          string            `json:"addr"`
 	RTTMillis     float64           `json:"rtt_ms"`
 	SharedStorage string            `json:"shared_storage,omitempty"`
@@ -218,12 +219,13 @@ type NodeView struct {
 	Hardware      *pb.HardwareInfo  `json:"hardware,omitempty"`
 	Metrics       *pb.Metrics       `json:"metrics,omitempty"`
 	Used          Resources         `json:"used"` // reserved by tasks on this node
+	RunningTasks  int               `json:"running_tasks"`
 }
 
 func (c *Controller) nodeView(n *store.Node) *NodeView {
 	v := &NodeView{
 		ID: n.ID, Name: n.Name, Status: string(n.Status), Location: n.Location, Ephemeral: n.Ephemeral,
-		Draining: n.Draining, Labels: n.EffectiveLabels(), Addr: n.Addr, SharedStorage: n.SharedStorage,
+		Draining: n.Draining, Labels: n.EffectiveLabels(), AdminLabels: n.Labels, Addr: n.Addr, SharedStorage: n.SharedStorage,
 		CreatedAt: n.CreatedAt, LastSeen: n.LastSeen,
 	}
 	if n.Hardware != "" {
@@ -254,13 +256,14 @@ func (c *Controller) ListNodeViews() ([]*NodeView, error) {
 	if err != nil {
 		return nil, err
 	}
-	used := c.usedResources()
+	used, running := c.usedResources(), c.runningTasks()
 	out := make([]*NodeView, 0, len(nodes))
 	for _, n := range nodes {
 		v := c.nodeView(n)
 		if u := used[n.ID]; u != nil {
 			v.Used = *u
 		}
+		v.RunningTasks = running[n.ID]
 		out = append(out, v)
 	}
 	return out, nil
@@ -275,6 +278,7 @@ func (c *Controller) NodeView(id string) (*NodeView, error) {
 	if u := c.usedResources()[id]; u != nil {
 		v.Used = *u
 	}
+	v.RunningTasks = c.runningTasks()[id]
 	return v, nil
 }
 
