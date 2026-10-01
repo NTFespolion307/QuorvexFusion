@@ -8,7 +8,7 @@
 #   ./install.sh uninstall [--purge]  remove everything (--purge also deletes data)
 #
 # Every question has a flag, so it can run unattended, e.g.
-#   ./install.sh worker --controller 10.0.0.5:7443 --token cjt_... --ca-fingerprint sha256:... --yes
+#   ./install.sh worker --controller 10.0.0.5 --code 7KQ2-MX4P-9TRA-BH3W-C8NE
 #
 # Run `./install.sh help` for all options.
 set -euo pipefail
@@ -377,7 +377,7 @@ cmd_controller() {
   state_set controller_data "$data"
   mkdir -p "$CONF_DIR"
 
-  local token="" fp="" node_addr="" ui_url=""
+  local token="" code="" fp="" node_addr="" ui_url=""
   if [ "$existing" = 0 ]; then
     local args=(controller init --data-dir "$data" --node-listen "$listen_ip:$node_port"
       --http-listen "$listen_ip:$http_port" --password-stdin --cli-config "$CONF_DIR/cli.json" --json)
@@ -386,6 +386,7 @@ cmd_controller() {
     local out
     out=$(printf '%s\n' "$password" | "$BIN" "${args[@]}")
     token=$(printf '%s' "$out" | sed -n 's/.*"join_token":"\([^"]*\)".*/\1/p')
+    code=$(printf '%s' "$out" | sed -n 's/.*"join_code":"\([^"]*\)".*/\1/p')
     fp=$(printf '%s' "$out" | sed -n 's/.*"ca_fingerprint":"\([^"]*\)".*/\1/p')
     node_addr=$(printf '%s' "$out" | sed -n 's/.*"node_addr":"\([^"]*\)".*/\1/p')
     ui_url=$(printf '%s' "$out" | sed -n 's/.*"ui_url":"\([^"]*\)".*/\1/p')
@@ -420,14 +421,13 @@ cmd_controller() {
   firewall_hint "$node_port" "$http_port"
 
   if [ "$with_worker" = 1 ]; then
-    if [ -z "$token" ] && [ ! -f "$(state_get worker_data)/worker.json" ]; then
-      # Existing controller, new local worker: mint a single-use token.
-      local created
-      created=$("$BIN" --config "$CONF_DIR/cli.json" token create --description "local worker" --max-uses 1 --expires 1h --json)
-      token=$(printf '%s' "$created" | grep -o 'cjt_[0-9a-f]*_[0-9a-f]*' | head -1)
-      fp=$(printf '%s' "$created" | grep -o 'sha256:[0-9a-f]*' | head -1)
+    if [ -z "$code" ] && [ ! -f "$(state_get worker_data)/worker.json" ]; then
+      # Existing controller, new local worker: mint a single-use code.
+      code=$("$BIN" --config "$CONF_DIR/cli.json" token create --description "local worker" --max-uses 1 --expires 1h --json \
+        | sed -n 's/.*"code": *"\([^"]*\)".*/\1/p' | head -1)
     fi
-    local wargs=(--controller "$connect_ip:$node_port" --token "$token" --ca-fingerprint "$fp" --yes)
+    # The code pins the CA, so no fingerprint is needed.
+    local wargs=(--controller "$connect_ip:$node_port" --code "$code" --yes)
     [ -n "$worker_location" ] && wargs+=(--location "$worker_location")
     echo
     info "Setting up the worker on this machine"
@@ -450,12 +450,16 @@ EOF
 
   The CLI is configured for root${SUDO_USER:+ and $SUDO_USER}: try ${BOLD}cluster status${RESET}
 
-Join another machine to the pool (this token auto-approves and is valid 7 days):
+${BOLD}Join code:  $code${RESET}   (auto-approves, valid 7 days)
 
-  git clone https://github.com/$REPO.git && cd QuorvexFusion && \\
-    sudo ./install.sh worker --controller $node_addr --token $token --ca-fingerprint $fp --yes
+To add another machine: get this repository onto it, then run
+  ${BOLD}sudo ./install.sh worker${RESET}
+It finds this controller on the LAN and asks for the code. From another
+network, give the address too:
+  sudo ./install.sh worker --controller $node_addr --code $code
 
-Create more tokens with ${BOLD}cluster token create${RESET} (or later in the web UI).
+Create more codes with ${BOLD}cluster token create${RESET} (or later in the web UI).
+For scripts, the long form is $token with --ca-fingerprint $fp
 EOF
   fi
 }
@@ -468,8 +472,10 @@ Usage: ./install.sh worker [options]
 
   --controller HOST:PORT  controller node address (default port 7443); if omitted,
                           controllers on the LAN are listed to choose from
-  --token TOKEN           join token (not needed if this machine already joined)
-  --ca-fingerprint FP     expected controller CA fingerprint (sha256:...)
+  --code CODE             join code shown by the controller, e.g. 7KQ2-MX4P-9TRA-BH3W-C8NE
+                          (not needed if this machine already joined)
+  --token TOKEN           long join token (cjt_...), alternative to --code
+  --ca-fingerprint FP     controller CA fingerprint; only needed with --token
   --location NAME         location label, e.g. home, vastai, gcp-us-central1
   --name NAME             node name (default: hostname)
   --label KEY=VALUE       node label (repeatable)
@@ -489,7 +495,7 @@ cmd_worker() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --controller) controller=$2; shift ;;
-      --token) token=$2; shift ;;
+      --token | --code) token=$2; shift ;;
       --ca-fingerprint) fp=$2; shift ;;
       --location) location=$2; shift ;;
       --name) name=$2; shift ;;
@@ -528,9 +534,9 @@ cmd_worker() {
     fi
   fi
   if [ "$joined" = 0 ] && [ -z "$token" ]; then
-    interactive || die "--token is required for the first join"
-    ask_secret token "Join token (from the controller install output, the web UI, or 'cluster token create')"
-    [ -n "$token" ] || die "a join token is required"
+    interactive || die "--code is required for the first join"
+    ask token "Join code (shown by the controller install, or 'cluster token create')" ""
+    [ -n "$token" ] || die "a join code is required"
   fi
   if [ "$joined" = 0 ]; then
     [ -n "$location" ] || ask location "Location label for this machine (e.g. home, office, vastai; optional)" ""
@@ -602,7 +608,13 @@ choose_controller() {
   info "Looking for controllers on the local network..."
   local lines=() line i=1 choice
   while IFS= read -r line; do [ -n "$line" ] && lines+=("$line"); done < <("$BIN" discover --plain --timeout 3s 2>/dev/null || true)
-  if [ ${#lines[@]} -gt 0 ]; then
+  if [ ${#lines[@]} -eq 1 ]; then
+    IFS=$'\t' read -r addr _ lname <<< "${lines[0]}"
+    if confirm "Found controller $lname at $addr. Use it?" y; then
+      controller=$addr
+      return
+    fi
+  elif [ ${#lines[@]} -gt 1 ]; then
     for line in "${lines[@]}"; do
       IFS=$'\t' read -r addr lfp lname <<< "$line"
       printf '  %d) %-22s %-20s %s\n' "$i" "$addr" "$lname" "${lfp:0:23}..."
@@ -617,7 +629,7 @@ choose_controller() {
   else
     echo "  None found (multicast may be blocked; that's normal across VPNs and clouds)."
   fi
-  ask controller "Controller address (IP, hostname or Tailscale name, with :port if not 7443)" ""
+  ask controller "Controller address (IP, hostname or Tailscale name; port 7443 is assumed)" ""
   [ -n "$controller" ] || die "a controller address is required"
   [[ "$controller" == *:* ]] || controller="$controller:7443"
 }

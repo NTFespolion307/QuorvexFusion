@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
+	"github.com/NTFespolion307/QuorvexFusion/internal/joincode"
 	"github.com/NTFespolion307/QuorvexFusion/internal/pki"
 	"github.com/NTFespolion307/QuorvexFusion/internal/ratelimit"
 	"github.com/NTFespolion307/QuorvexFusion/internal/secret"
@@ -144,8 +146,18 @@ func (ns *nodeServer) Join(ctx context.Context, req *pb.JoinRequest) (*pb.JoinRe
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// A new node: the token must be valid.
-	tok, err := c.store.UseJoinToken(req.Token, time.Now())
+	// A new node: the token must be valid. It may be a long cjt_ token or a
+	// short join code, whose pin must name this controller's CA.
+	var tok *store.JoinToken
+	if !strings.HasPrefix(req.Token, secret.PrefixJoin+"_") && joincode.Looks(req.Token) {
+		pin, sec, _ := joincode.Parse(req.Token)
+		if !joincode.Matches(pin, c.ca.Cert) {
+			return nil, status.Error(codes.Unauthenticated, "this join code belongs to a different controller (or has a typo)")
+		}
+		tok, err = c.store.UseJoinSecret(sec, time.Now())
+	} else {
+		tok, err = c.store.UseJoinToken(req.Token, time.Now())
+	}
 	if err != nil {
 		c.log.Warn("join rejected", "ip", ip, "hostname", req.Hostname, "err", err)
 		if errors.Is(err, store.ErrBadToken) {

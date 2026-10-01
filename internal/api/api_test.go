@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/NTFespolion307/QuorvexFusion/internal/controller"
+	"github.com/NTFespolion307/QuorvexFusion/internal/joincode"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
@@ -84,9 +85,13 @@ func TestLoginAndJoinToken(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create join token: %d %v", resp.StatusCode, out)
 	}
+	code, _ := out["code"].(string)
+	if !joincode.Looks(code) {
+		t.Fatalf("response code %q is not a join code", code)
+	}
 	cmds, _ := out["commands"].(map[string]any)
-	if s, _ := cmds["bootstrap"].(string); !strings.Contains(s, "--ca-fingerprint sha256:") {
-		t.Errorf("bootstrap command lacks fingerprint: %q", s)
+	if s, _ := cmds["install"].(string); !strings.Contains(s, "--code "+code) {
+		t.Errorf("install command lacks the join code: %q", s)
 	}
 
 	resp, _ = do(t, srv, "POST", "/api/v1/join-tokens", token, map[string]any{"expires_in": "soon"})

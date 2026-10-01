@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
+	"github.com/NTFespolion307/QuorvexFusion/internal/joincode"
 	"github.com/NTFespolion307/QuorvexFusion/internal/pki"
 )
 
@@ -26,12 +28,15 @@ var ErrRevoked = errors.New("this node was revoked or removed by the controller;
 var ErrPending = errors.New("join is pending approval")
 
 // trustController establishes which CA we trust for addr: an already
-// pinned ca.crt, or the controller's CA after checking its fingerprint
-// (given up-front, or confirmed interactively by the user).
+// pinned ca.crt, or the controller's CA after checking it against the join
+// code's pin, the --ca-fingerprint, or the user's confirmation.
 func (w *Worker) trustController(addr string) (*x509.Certificate, error) {
 	if ca, err := w.id.ca(); err == nil {
 		if w.opts.CAFingerprint != "" && pki.Fingerprint(ca) != pki.NormalizeFingerprint(w.opts.CAFingerprint) {
 			return nil, fmt.Errorf("pinned CA in %s does not match --ca-fingerprint", w.id.dir)
+		}
+		if pin, ok := w.codePin(); ok && !joincode.Matches(pin, ca) {
+			return nil, fmt.Errorf("pinned CA in %s does not match the join code (it belongs to another controller)", w.id.dir)
 		}
 		return ca, nil
 	}
@@ -40,7 +45,15 @@ func (w *Worker) trustController(addr string) (*x509.Certificate, error) {
 		return nil, fmt.Errorf("contact controller %s: %w", addr, err)
 	}
 	fp := pki.Fingerprint(ca)
+	pin, hasCode := w.codePin()
 	switch {
+	case hasCode:
+		// The join code carries a pin of the controller's CA: checking it
+		// replaces comparing fingerprints by hand.
+		if !joincode.Matches(pin, ca) {
+			return nil, fmt.Errorf("the join code does not match the controller at %s: check the code for typos, "+
+				"or this is not the controller that issued it", addr)
+		}
 	case w.opts.CAFingerprint != "":
 		if fp != pki.NormalizeFingerprint(w.opts.CAFingerprint) {
 			return nil, fmt.Errorf("controller CA fingerprint mismatch!\n  expected %s\n  got      %s\n"+
@@ -60,6 +73,15 @@ func (w *Worker) trustController(addr string) (*x509.Certificate, error) {
 		return nil, err
 	}
 	return ca, nil
+}
+
+// codePin returns the CA pin when the token is a short join code.
+func (w *Worker) codePin() (string, bool) {
+	if strings.HasPrefix(w.opts.Token, "cjt_") {
+		return "", false
+	}
+	pin, _, err := joincode.Parse(w.opts.Token)
+	return pin, err == nil
 }
 
 // join performs (or polls) the join handshake. It returns nil once the node

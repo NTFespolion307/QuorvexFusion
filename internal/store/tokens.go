@@ -97,20 +97,30 @@ func (s *Store) RevokeJoinToken(id string, now time.Time) error {
 // reveal more detail than this to unauthenticated clients.
 var ErrBadToken = errors.New("invalid join token")
 
-// UseJoinToken validates a full token string and consumes one use of it.
-// The returned error is ErrBadToken for unknown/mismatched tokens, or a
-// descriptive error for expired/revoked/exhausted ones.
+// UseJoinToken validates a full "cjt_<id>_<secret>" token and consumes one
+// use of it. The returned error is ErrBadToken for unknown/mismatched
+// tokens, or a descriptive error for expired/revoked/exhausted ones.
 func (s *Store) UseJoinToken(token string, now time.Time) (*JoinToken, error) {
 	id, sec, err := secret.Parse(secret.PrefixJoin, token)
 	if err != nil {
 		return nil, ErrBadToken
 	}
+	return s.useJoinToken(`id = ?`, id, sec, now)
+}
+
+// UseJoinSecret is UseJoinToken for the secret part of a join code, which
+// has no ID: the token is found by the hash of its secret.
+func (s *Store) UseJoinSecret(sec string, now time.Time) (*JoinToken, error) {
+	return s.useJoinToken(`secret_hash = ?`, secret.Hash(sec), sec, now)
+}
+
+func (s *Store) useJoinToken(where string, arg any, sec string, now time.Time) (*JoinToken, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	t, err := scanJoinToken(tx.QueryRow(`SELECT `+joinTokenCols+` FROM join_tokens WHERE id = ?`, id))
+	t, err := scanJoinToken(tx.QueryRow(`SELECT `+joinTokenCols+` FROM join_tokens WHERE `+where, arg))
 	if errors.Is(err, ErrNotFound) {
 		return nil, ErrBadToken
 	}
@@ -123,7 +133,7 @@ func (s *Store) UseJoinToken(token string, now time.Time) (*JoinToken, error) {
 	if err := t.Usable(now); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE join_tokens SET uses = uses + 1 WHERE id = ?`, id); err != nil {
+	if _, err := tx.Exec(`UPDATE join_tokens SET uses = uses + 1 WHERE id = ?`, t.ID); err != nil {
 		return nil, err
 	}
 	t.Uses++

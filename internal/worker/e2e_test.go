@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,11 +162,12 @@ func TestManualApproval(t *testing.T) {
 	defer func() { pendingPollInterval = 10 * time.Second }()
 
 	tc := startController(t, 15)
-	token, _, err := tc.c.CreateJoinToken(controller.JoinTokenOptions{AutoApprove: false})
+	issued, _, err := tc.c.CreateJoinToken(controller.JoinTokenOptions{AutoApprove: false})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := tc.newWorker(t, token, tc.fp)
+	// A short join code, no fingerprint: the code's pin verifies the CA.
+	w := tc.newWorker(t, strings.ToLower(issued.Code), "")
 	nodeID, pending, err := w.JoinOnly(context.Background())
 	if err != nil || !pending {
 		t.Fatalf("JoinOnly: id=%s pending=%v err=%v", nodeID, pending, err)
@@ -197,6 +199,41 @@ func TestWrongFingerprintAndBadToken(t *testing.T) {
 	w = tc.newWorker(t, "cjt_abcd_wrong", tc.fp)
 	if _, _, err := w.JoinOnly(context.Background()); err == nil {
 		t.Fatal("joined with a bogus token")
+	}
+}
+
+func TestJoinCodes(t *testing.T) {
+	tc := startController(t, 15)
+	other := startController(t, 15) // a second, unrelated controller
+	issued, _, err := tc.c.CreateJoinToken(controller.JoinTokenOptions{AutoApprove: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A valid code joins without any fingerprint.
+	w := tc.newWorker(t, issued.Code, "")
+	if _, pending, err := w.JoinOnly(context.Background()); err != nil || pending {
+		t.Fatalf("join with code: pending=%v err=%v", pending, err)
+	}
+
+	// The same code pointed at another controller is refused by the worker
+	// before it sends anything (the pin doesn't match that CA).
+	w = New(Options{DataDir: filepath.Join(t.TempDir(), "w"), Controller: other.nodeAddr, Token: issued.Code,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if _, _, err := w.JoinOnly(context.Background()); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("code accepted by the wrong controller: %v", err)
+	}
+
+	// A typo in the secret half: the pin matches, the controller says no.
+	code := []byte(strings.ReplaceAll(issued.Code, "-", ""))
+	if code[19] == 'A' {
+		code[19] = 'B'
+	} else {
+		code[19] = 'A'
+	}
+	w = tc.newWorker(t, string(code), "")
+	if _, _, err := w.JoinOnly(context.Background()); err == nil {
+		t.Fatal("joined with a mistyped code")
 	}
 }
 

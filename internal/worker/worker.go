@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"os"
 	"os/user"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -78,12 +80,20 @@ func (w *Worker) hostname() string {
 // back to the one saved at join time.
 func (w *Worker) controllerAddr() (string, error) {
 	if w.opts.Controller != "" {
-		return w.opts.Controller, nil
+		return WithDefaultPort(w.opts.Controller), nil
 	}
 	if st, err := w.id.loadState(); err == nil && st.Controller != "" {
 		return st.Controller, nil
 	}
 	return "", errors.New("no controller address: pass --controller host:port")
+}
+
+// WithDefaultPort adds the default node port (7443) to a bare host name.
+func WithDefaultPort(addr string) string {
+	if _, _, err := net.SplitHostPort(addr); err != nil {
+		return net.JoinHostPort(strings.Trim(addr, "[]"), "7443")
+	}
+	return addr
 }
 
 // Run joins if necessary, then keeps the control stream up until ctx is

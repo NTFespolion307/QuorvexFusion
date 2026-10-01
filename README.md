@@ -31,8 +31,8 @@ sudo ./install.sh controller
 The installer builds the binary (downloading Go temporarily if needed), asks
 a few questions (ports, admin password, whether this machine should also run
 a worker), and starts a `cluster-controller` systemd service. It ends by
-printing the web UI address, the controller's **CA fingerprint**, and a
-ready-to-paste command for joining workers.
+printing the web UI address and a **join code** such as
+`7KQ2-MX4P-9TRA-BH3W-C8NE`.
 
 ### 2. Join workers
 
@@ -41,15 +41,24 @@ On every other machine:
 ```sh
 git clone https://github.com/NTFespolion307/QuorvexFusion.git
 cd QuorvexFusion
-sudo ./install.sh worker --controller CONTROLLER_IP:7443 --token cjt_... --ca-fingerprint sha256:... --yes
+sudo ./install.sh worker
 ```
 
-Or run `sudo ./install.sh worker` without options: it lists controllers found
-on your LAN, asks for the join token, and shows the controller's fingerprint
-for you to compare with the one printed in step 1.
+It finds the controller on your LAN and asks for the join code. That's all:
+the code also verifies that the controller is really yours (it contains a
+pin of the controller's certificate), so there's no fingerprint to compare.
+Codes are case-insensitive and the dashes are optional.
 
-Need another token? On the controller: `cluster token create`
-(`--manual-approve` makes new nodes wait for `cluster nodes approve <node>`).
+If the controller is on another network (VPN, cloud, internet), give its
+address; port 7443 is assumed:
+
+```sh
+sudo ./install.sh worker --controller 203.0.113.7 --code 7KQ2-MX4P-9TRA-BH3W-C8NE
+```
+
+Need another code? On the controller: `cluster token create`
+(`--max-uses 1`, `--expires 1h`, or `--manual-approve` to make new nodes
+wait for `cluster nodes approve <node>`).
 
 ### 3. Run jobs
 
@@ -100,11 +109,11 @@ Inside containers (or anywhere without systemd), run the worker in the
 foreground under any process supervisor:
 
 ```sh
-cluster worker --controller CONTROLLER_IP:7443 --token cjt_... --ca-fingerprint sha256:... \
+cluster worker --controller CONTROLLER_IP --code 7KQ2-MX4P-9TRA-BH3W-C8NE \
   --data-dir /var/lib/cluster-worker --location vastai --ephemeral
 ```
 
-The token is only needed for the first run; the node's identity is saved in
+The code is only needed for the first run; the node's identity is saved in
 `--data-dir`. Keep that directory on persistent storage if the container may
 restart. Without root and systemd, CPU/memory limits are not enforced.
 

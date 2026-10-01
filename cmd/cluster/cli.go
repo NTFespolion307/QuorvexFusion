@@ -378,9 +378,12 @@ func tokenCmd() *cobra.Command {
 				req["max_uses"] = maxUses
 			}
 			var resp struct {
-				Token     string                  `json:"token"`
-				JoinToken store.JoinToken         `json:"join_token"`
-				Commands  controller.JoinCommands `json:"commands"`
+				Token         string                  `json:"token"`
+				Code          string                  `json:"code"`
+				CAFingerprint string                  `json:"ca_fingerprint"`
+				NodeAddr      string                  `json:"node_addr"`
+				JoinToken     store.JoinToken         `json:"join_token"`
+				Commands      controller.JoinCommands `json:"commands"`
 			}
 			if err := call("POST", "/api/v1/join-tokens", req, &resp); err != nil {
 				return err
@@ -388,9 +391,11 @@ func tokenCmd() *cobra.Command {
 			if globalFlags.json {
 				return printJSON(resp)
 			}
-			fmt.Printf("Join token (shown only once):\n  %s\n\n", resp.Token)
-			fmt.Printf("Worker with the binary installed:\n  %s\n\n", resp.Commands.Direct)
-			fmt.Printf("On a new machine:\n  %s\n", resp.Commands.Install)
+			fmt.Printf("Join code (shown only once):  %s\n\n", resp.Code)
+			fmt.Printf("On the new machine, in a checkout of the repository, run\n  sudo ./install.sh worker\n")
+			fmt.Printf("and enter the code; on another network add --controller %s --code %s\n\n", resp.NodeAddr, resp.Code)
+			fmt.Printf("With the binary already installed:\n  %s\n\n", resp.Commands.Direct)
+			fmt.Printf("For scripts, the same token in long form (use with --ca-fingerprint %s):\n  %s\n", resp.CAFingerprint, resp.Token)
 			return nil
 		},
 	}

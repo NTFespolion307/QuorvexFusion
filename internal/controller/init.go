@@ -19,6 +19,7 @@ type InitResult struct {
 	Config        *Config
 	CAFingerprint string
 	JoinToken     string // first join token (auto-approve, 7 days)
+	JoinCode      string // the same token as a short join code
 	APIToken      string // token for the local CLI
 }
 
@@ -55,12 +56,13 @@ func Init(cfg *Config, adminPassword string) (*InitResult, error) {
 
 	res := &InitResult{Config: cfg, CAFingerprint: ca.Fingerprint()}
 	expires := time.Now().Add(7 * 24 * time.Hour)
-	res.JoinToken, _, err = createJoinToken(st, JoinTokenOptions{
+	issued, _, err := createJoinToken(st, ca.Cert, JoinTokenOptions{
 		Description: "created by init", AutoApprove: true, ExpiresAt: &expires,
 	})
 	if err != nil {
 		return nil, err
 	}
+	res.JoinToken, res.JoinCode = issued.Token, issued.Code
 	res.APIToken, _, err = createAPIToken(st, "local-cli")
 	if err != nil {
 		return nil, err

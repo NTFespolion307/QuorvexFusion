@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
+	"github.com/NTFespolion307/QuorvexFusion/internal/joincode"
 	"github.com/NTFespolion307/QuorvexFusion/internal/pki"
 	"github.com/NTFespolion307/QuorvexFusion/internal/secret"
 	"github.com/NTFespolion307/QuorvexFusion/internal/store"
@@ -45,22 +46,33 @@ type JoinTokenOptions struct {
 	Ephemeral   bool
 }
 
-func createJoinToken(st *store.Store, o JoinTokenOptions) (string, *store.JoinToken, error) {
-	token, id, hash := secret.New(secret.PrefixJoin)
+// IssuedJoinToken is a newly created join token in its two equivalent
+// forms. Only a hash of the secret is stored, so these are shown once.
+type IssuedJoinToken struct {
+	Token string `json:"token"` // cjt_<id>_<secret>: for scripts, used with --ca-fingerprint
+	Code  string `json:"code"`  // short code that also pins the controller's CA (see package joincode)
+}
+
+func createJoinToken(st *store.Store, ca *x509.Certificate, o JoinTokenOptions) (IssuedJoinToken, *store.JoinToken, error) {
+	sec := joincode.NewSecret()
+	id := secret.RandomHex(4)
 	t := &store.JoinToken{
-		ID: id, SecretHash: hash, Description: o.Description, CreatedAt: time.Now(),
+		ID: id, SecretHash: secret.Hash(sec), Description: o.Description, CreatedAt: time.Now(),
 		ExpiresAt: o.ExpiresAt, MaxUses: o.MaxUses, AutoApprove: o.AutoApprove,
 		Location: o.Location, Ephemeral: o.Ephemeral,
 	}
 	if err := st.CreateJoinToken(t); err != nil {
-		return "", nil, err
+		return IssuedJoinToken{}, nil, err
 	}
-	return token, t, nil
+	return IssuedJoinToken{
+		Token: secret.PrefixJoin + "_" + id + "_" + sec,
+		Code:  joincode.Format(joincode.Pin(ca), sec),
+	}, t, nil
 }
 
-// CreateJoinToken returns the full token string (shown once) and its record.
-func (c *Controller) CreateJoinToken(o JoinTokenOptions) (string, *store.JoinToken, error) {
-	return createJoinToken(c.store, o)
+// CreateJoinToken creates a join token; see IssuedJoinToken.
+func (c *Controller) CreateJoinToken(o JoinTokenOptions) (IssuedJoinToken, *store.JoinToken, error) {
+	return createJoinToken(c.store, c.ca.Cert, o)
 }
 
 // JoinCommands are ready-to-paste commands for joining a worker.
@@ -74,12 +86,13 @@ type JoinCommands struct {
 // RepoURL is where install.sh and release binaries live.
 const RepoURL = "https://github.com/NTFespolion307/QuorvexFusion"
 
-func (c *Controller) JoinCommands(token string) JoinCommands {
+// JoinCommands builds the join commands around a join code, which carries
+// the CA pin, so no separate fingerprint is needed.
+func (c *Controller) JoinCommands(code string) JoinCommands {
 	addr := c.cfg.NodeAddr()
-	fp := c.CAFingerprint()
-	args := fmt.Sprintf("--controller %s --token %s --ca-fingerprint %s", addr, token, fp)
+	args := fmt.Sprintf("--controller %s --token %s", addr, code)
 	return JoinCommands{
-		Install:   fmt.Sprintf("git clone %s.git && cd QuorvexFusion && sudo ./install.sh worker %s --yes", RepoURL, args),
+		Install:   fmt.Sprintf("git clone %s.git && cd QuorvexFusion && sudo ./install.sh worker --controller %s --code %s", RepoURL, addr, code),
 		Bootstrap: fmt.Sprintf("curl -fsSL https://raw.githubusercontent.com/NTFespolion307/QuorvexFusion/main/bootstrap.sh | sh -s -- %s", args),
 		Docker:    fmt.Sprintf("docker run -d --name cluster-worker --restart unless-stopped -v cluster-worker:/var/lib/cluster-worker ghcr.io/ntfespolion307/cluster-worker %s", args),
 		Direct:    "cluster worker " + args,

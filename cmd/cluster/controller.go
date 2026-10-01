@@ -108,7 +108,8 @@ func controllerInitCmd(dataDir *string) *cobra.Command {
 			if globalFlags.json {
 				return json.NewEncoder(os.Stdout).Encode(map[string]string{
 					"data_dir": *dataDir, "ui_url": cfg.UIURL(), "node_addr": cfg.NodeAddr(),
-					"ca_fingerprint": res.CAFingerprint, "join_token": res.JoinToken, "cli_config": cliConfig,
+					"ca_fingerprint": res.CAFingerprint, "join_token": res.JoinToken, "join_code": res.JoinCode,
+					"cli_config": cliConfig,
 				})
 			}
 			self := selfCommand()
@@ -119,16 +120,15 @@ func controllerInitCmd(dataDir *string) *cobra.Command {
   CA fingerprint:  %s
   CLI config:      %s
 
-First join token (auto-approve, valid 7 days):
-  %s
+Join code (auto-approve, valid 7 days):  %s
 
 Join a worker with:
-  %s worker --controller %s --token %s --ca-fingerprint %s
+  %s worker --controller %s --token %s
 
 Start the controller with:
   %s controller --data-dir %s
 `, *dataDir, cfg.UIURL(), cfg.NodeAddr(), res.CAFingerprint, cliConfig,
-				res.JoinToken, self, cfg.NodeAddr(), res.JoinToken, res.CAFingerprint, self, *dataDir)
+				res.JoinCode, self, cfg.NodeAddr(), res.JoinCode, self, *dataDir)
 			return nil
 		},
 	}

@@ -24,10 +24,10 @@ const defaultWorkerDir = "/var/lib/cluster-worker"
 const exitRevoked = 3
 
 type workerFlags struct {
-	dataDir, controller, token, fingerprint string
-	name, location, sharedStorage, taskUser string
-	ephemeral, yes                          bool
-	labels                                  map[string]string
+	dataDir, controller, token, code, fingerprint string
+	name, location, sharedStorage, taskUser       string
+	ephemeral, yes                                bool
+	labels                                        map[string]string
 }
 
 func (wf *workerFlags) register(cmd *cobra.Command) {
@@ -35,7 +35,8 @@ func (wf *workerFlags) register(cmd *cobra.Command) {
 	// Environment variables make the Docker image and cloud-init easy to configure.
 	f.StringVar(&wf.dataDir, "data-dir", envOr("CLUSTER_WORKER_DATA_DIR", defaultWorkerDir), "worker data directory (identity and cache)")
 	f.StringVar(&wf.controller, "controller", os.Getenv("CLUSTER_WORKER_CONTROLLER"), "controller address host:port (node port, default 7443)")
-	f.StringVar(&wf.token, "token", os.Getenv("CLUSTER_JOIN_TOKEN"), "join token (only needed the first time)")
+	f.StringVar(&wf.token, "token", os.Getenv("CLUSTER_JOIN_TOKEN"), "join code or token (only needed the first time)")
+	f.StringVar(&wf.code, "code", "", "join code, e.g. 7KQ2-MX4P-9TRA-BH3W-C8NE (same as --token)")
 	f.StringVar(&wf.fingerprint, "ca-fingerprint", os.Getenv("CLUSTER_CA_FINGERPRINT"), "expected controller CA fingerprint (sha256:...)")
 	f.StringVar(&wf.name, "name", os.Getenv("CLUSTER_NODE_NAME"), "node name (default: hostname)")
 	f.StringVar(&wf.location, "location", os.Getenv("CLUSTER_LOCATION"), "location label, e.g. home, vastai, gcp-us-central1")
@@ -47,6 +48,9 @@ func (wf *workerFlags) register(cmd *cobra.Command) {
 }
 
 func (wf *workerFlags) options() worker.Options {
+	if wf.code != "" {
+		wf.token = wf.code
+	}
 	// CLUSTER_LABELS="gpu=4090,zone=home" (e.g. from /etc/cluster/worker.env)
 	// is merged under any --label flags.
 	if env := os.Getenv("CLUSTER_LABELS"); env != "" {

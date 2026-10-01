@@ -182,9 +182,12 @@ type createJoinTokenRequest struct {
 }
 
 type createJoinTokenResponse struct {
-	Token     string                  `json:"token"`
-	JoinToken any                     `json:"join_token"`
-	Commands  controller.JoinCommands `json:"commands"`
+	Token         string                  `json:"token"`
+	Code          string                  `json:"code"`
+	CAFingerprint string                  `json:"ca_fingerprint"`
+	NodeAddr      string                  `json:"node_addr"`
+	JoinToken     any                     `json:"join_token"`
+	Commands      controller.JoinCommands `json:"commands"`
 }
 
 func (s *Server) listJoinTokens(w http.ResponseWriter, r *http.Request) {
@@ -219,12 +222,15 @@ func (s *Server) createJoinToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "max_uses must be at least 1")
 		return
 	}
-	tok, rec, err := s.c.CreateJoinToken(opts)
+	issued, rec, err := s.c.CreateJoinToken(opts)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, createJoinTokenResponse{Token: tok, JoinToken: rec, Commands: s.c.JoinCommands(tok)})
+	writeJSON(w, http.StatusCreated, createJoinTokenResponse{
+		Token: issued.Token, Code: issued.Code, CAFingerprint: s.c.CAFingerprint(), NodeAddr: s.c.Config().NodeAddr(),
+		JoinToken: rec, Commands: s.c.JoinCommands(issued.Code),
+	})
 }
 
 func (s *Server) revokeJoinToken(w http.ResponseWriter, r *http.Request) {

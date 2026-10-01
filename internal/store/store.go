@@ -153,6 +153,10 @@ CREATE TABLE attempts (
 CREATE INDEX attempts_task ON attempts(task_id, number);
 CREATE INDEX attempts_state ON attempts(state);
 `,
+	// 3: join codes look tokens up by secret
+	`
+CREATE INDEX join_tokens_secret ON join_tokens(secret_hash);
+`,
 }
 
 func (s *Store) migrate() error {
