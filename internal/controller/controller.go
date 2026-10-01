@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -19,8 +20,10 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
+	"github.com/NTFespolion307/QuorvexFusion/internal/discovery"
 	"github.com/NTFespolion307/QuorvexFusion/internal/pki"
 	"github.com/NTFespolion307/QuorvexFusion/internal/store"
+	"github.com/NTFespolion307/QuorvexFusion/internal/version"
 )
 
 type Controller struct {
@@ -32,7 +35,8 @@ type Controller struct {
 	events *events
 	tm     *taskManager
 
-	joinMu sync.Mutex
+	joinMu          sync.Mutex
+	stopAdvertising func()
 }
 
 // New loads the CA and opens the database of an initialised data dir.
@@ -138,6 +142,9 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	errc := make(chan error, 2)
 	go func() { errc <- grpcServer.Serve(nodeLn) }()
 	go func() { errc <- httpServer.ServeTLS(httpLn, "", "") }()
+	if !c.cfg.DisableMDNS {
+		c.advertise()
+	}
 	go c.persistLastSeen(ctx)
 	go c.schedulerLoop(ctx)
 
@@ -146,6 +153,9 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	case err = <-errc:
 	}
 	c.log.Info("controller shutting down")
+	if c.stopAdvertising != nil {
+		c.stopAdvertising()
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
@@ -154,6 +164,26 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 		err = nil
 	}
 	return err
+}
+
+// advertise announces the controller on the LAN via mDNS. Failure is not
+// fatal: workers can always be given the address directly.
+func (c *Controller) advertise() {
+	_, portStr, _ := net.SplitHostPort(c.cfg.NodeListen)
+	port, _ := strconv.Atoi(portStr)
+	ips := c.cfg.advertiseIPs()
+	if port == 0 || len(ips) == 0 || ips[0].IsLoopback() {
+		return
+	}
+	stop, err := discovery.Advertise(discovery.Advertisement{
+		Port: port, IPs: ips, Fingerprint: c.CAFingerprint(), UIURL: c.cfg.UIURL(), Version: version.Version,
+	})
+	if err != nil {
+		c.log.Warn("LAN discovery (mDNS) unavailable", "err", err)
+		return
+	}
+	c.stopAdvertising = stop
+	c.log.Info("advertising on the LAN via mDNS", "port", port)
 }
 
 // persistLastSeen records last_seen for online nodes once a minute so the

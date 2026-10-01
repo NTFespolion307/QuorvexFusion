@@ -61,7 +61,7 @@ func controllerCmd() *cobra.Command {
 
 func controllerInitCmd(dataDir *string) *cobra.Command {
 	var nodeListen, httpListen, publicAddr, cliConfig string
-	var passwordStdin bool
+	var passwordStdin, noMDNS bool
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -81,6 +81,7 @@ func controllerInitCmd(dataDir *string) *cobra.Command {
 
 			cfg := controller.DefaultConfig(*dataDir)
 			cfg.NodeListen, cfg.HTTPListen, cfg.PublicAddr = nodeListen, httpListen, publicAddr
+			cfg.DisableMDNS = noMDNS
 			res, err := controller.Init(cfg, password)
 			if err != nil {
 				return err
@@ -137,6 +138,7 @@ Start the controller with:
 	f.StringVar(&publicAddr, "public-addr", "", "host name or IP that workers and browsers use (domain, public IP, Tailscale name)")
 	f.StringVar(&cliConfig, "cli-config", "", "where to write the local CLI config (default ~/.config/cluster/cli.json)")
 	f.BoolVar(&passwordStdin, "password-stdin", false, "read the admin password from stdin (or set CLUSTER_ADMIN_PASSWORD)")
+	f.BoolVar(&noMDNS, "no-mdns", false, "don't advertise the controller on the LAN")
 	return cmd
 }
 

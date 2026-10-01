@@ -1,0 +1,26 @@
+# Installed by install.sh, which replaces @BIN@ and @DATA_DIR@.
+#
+# The worker runs as root so it can create a cgroup scope (systemd-run
+# --scope) per task and switch to the unprivileged task user. Settings such
+# as location and labels live in /etc/cluster/worker.env.
+[Unit]
+Description=QuorvexFusion cluster worker
+Documentation=https://github.com/NTFespolion307/QuorvexFusion
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/cluster/worker.env
+ExecStart=@BIN@ worker --data-dir @DATA_DIR@
+Restart=always
+RestartSec=5
+# Exit code 3 means the node was revoked: restarting would not help.
+RestartPreventExitStatus=3
+# On stop, the worker gets SIGTERM and kills its tasks itself (reporting
+# them as lost so they are requeued); anything left is killed after 30s.
+KillMode=mixed
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

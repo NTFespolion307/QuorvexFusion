@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,6 +47,20 @@ func (wf *workerFlags) register(cmd *cobra.Command) {
 }
 
 func (wf *workerFlags) options() worker.Options {
+	// CLUSTER_LABELS="gpu=4090,zone=home" (e.g. from /etc/cluster/worker.env)
+	// is merged under any --label flags.
+	if env := os.Getenv("CLUSTER_LABELS"); env != "" {
+		merged := map[string]string{}
+		for _, kv := range strings.Split(env, ",") {
+			if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok && k != "" {
+				merged[k] = v
+			}
+		}
+		for k, v := range wf.labels {
+			merged[k] = v
+		}
+		wf.labels = merged
+	}
 	return worker.Options{
 		DataDir: wf.dataDir, Controller: wf.controller, Token: wf.token, CAFingerprint: wf.fingerprint,
 		ConfirmFingerprint: fingerprintConfirmer(wf.yes),

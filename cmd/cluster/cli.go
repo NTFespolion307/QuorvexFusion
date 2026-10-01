@@ -390,8 +390,7 @@ func tokenCmd() *cobra.Command {
 			}
 			fmt.Printf("Join token (shown only once):\n  %s\n\n", resp.Token)
 			fmt.Printf("Worker with the binary installed:\n  %s\n\n", resp.Commands.Direct)
-			fmt.Printf("From a git clone:\n  %s\n\n", resp.Commands.Install)
-			fmt.Printf("One-line bootstrap (cloud-init, vast.ai on-start):\n  %s\n", resp.Commands.Bootstrap)
+			fmt.Printf("On a new machine:\n  %s\n", resp.Commands.Install)
 			return nil
 		},
 	}

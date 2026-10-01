@@ -263,16 +263,24 @@ func HasSystemd() bool {
 
 func localIPs() []string {
 	var out []string
-	addrs, err := net.InterfaceAddrs()
+	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
-	for _, a := range addrs {
-		ipn, ok := a.(*net.IPNet)
-		if !ok || ipn.IP.IsLoopback() || ipn.IP.IsLinkLocalUnicast() {
+	for _, iface := range ifaces {
+		// Skip by flag too: some systems (e.g. WSL) put non-127.x
+		// addresses on the loopback interface.
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		out = append(out, ipn.IP.String())
+		addrs, _ := iface.Addrs()
+		for _, a := range addrs {
+			ipn, ok := a.(*net.IPNet)
+			if !ok || ipn.IP.IsLoopback() || ipn.IP.IsLinkLocalUnicast() {
+				continue
+			}
+			out = append(out, ipn.IP.String())
+		}
 	}
 	return out
 }

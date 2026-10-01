@@ -79,7 +79,7 @@ func (c *Controller) JoinCommands(token string) JoinCommands {
 	fp := c.CAFingerprint()
 	args := fmt.Sprintf("--controller %s --token %s --ca-fingerprint %s", addr, token, fp)
 	return JoinCommands{
-		Install:   fmt.Sprintf("git clone %s.git cluster && cd cluster && sudo ./install.sh worker %s --yes", RepoURL, args),
+		Install:   fmt.Sprintf("git clone %s.git && cd QuorvexFusion && sudo ./install.sh worker %s --yes", RepoURL, args),
 		Bootstrap: fmt.Sprintf("curl -fsSL https://raw.githubusercontent.com/NTFespolion307/QuorvexFusion/main/bootstrap.sh | sh -s -- %s", args),
 		Docker:    fmt.Sprintf("docker run -d --name cluster-worker --restart unless-stopped -v cluster-worker:/var/lib/cluster-worker ghcr.io/ntfespolion307/cluster-worker %s", args),
 		Direct:    "cluster worker " + args,

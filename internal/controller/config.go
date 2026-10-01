@@ -30,6 +30,9 @@ type Config struct {
 	HeartbeatTimeoutSec int `json:"heartbeat_timeout_sec"`
 	// MetricsIntervalSec: how often workers send metrics.
 	MetricsIntervalSec int `json:"metrics_interval_sec"`
+
+	// DisableMDNS stops advertising the controller on the local network.
+	DisableMDNS bool `json:"disable_mdns,omitempty"`
 }
 
 func DefaultConfig(dataDir string) *Config {
@@ -106,18 +109,66 @@ func (c *Config) advertisedHost() string {
 	if host, _, err := net.SplitHostPort(c.NodeListen); err == nil && host != "" && host != "0.0.0.0" && host != "::" {
 		return host
 	}
+	if ip := outboundIPv4(); ip != "" {
+		return ip
+	}
 	if ips := localIPv4s(); len(ips) > 0 {
 		return ips[0]
 	}
 	return "localhost"
 }
 
+// outboundIPv4 is the address of the interface with the default route,
+// usually the one other machines can reach. "Dialing" UDP sends nothing; it
+// just makes the kernel pick a source address.
+func outboundIPv4() string {
+	conn, err := net.Dial("udp4", "192.0.2.1:9") // TEST-NET-1, never routed anywhere
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if a, ok := conn.LocalAddr().(*net.UDPAddr); ok && !a.IP.IsLoopback() {
+		return a.IP.String()
+	}
+	return ""
+}
+
+// advertiseIPs are the addresses announced over mDNS.
+func (c *Config) advertiseIPs() []net.IP {
+	if host, _, err := net.SplitHostPort(c.NodeListen); err == nil {
+		if ip := net.ParseIP(host); ip != nil && !ip.IsUnspecified() {
+			return []net.IP{ip}
+		}
+	}
+	// The default-route address first: mDNS clients typically use the first.
+	var out []net.IP
+	first := outboundIPv4()
+	if first != "" {
+		out = append(out, net.ParseIP(first))
+	}
+	for _, s := range localIPv4s() {
+		if s != first {
+			out = append(out, net.ParseIP(s))
+		}
+	}
+	return out
+}
+
+// localIPv4s lists IPv4 addresses on interfaces that are up and not
+// loopback interfaces (checked by flag: some systems, e.g. WSL, put
+// non-127.x addresses on "lo").
 func localIPv4s() []string {
 	var out []string
-	addrs, _ := net.InterfaceAddrs()
-	for _, a := range addrs {
-		if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() && ipn.IP.To4() != nil && !ipn.IP.IsLinkLocalUnicast() {
-			out = append(out, ipn.IP.String())
+	ifaces, _ := net.Interfaces()
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil && !ipn.IP.IsLoopback() && !ipn.IP.IsLinkLocalUnicast() {
+				out = append(out, ipn.IP.String())
+			}
 		}
 	}
 	return out

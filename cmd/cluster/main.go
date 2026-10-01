@@ -45,6 +45,7 @@ func main() {
 		controllerCmd(),
 		workerCmd(),
 		loginCmd(),
+		discoverCmd(),
 		statusCmd(),
 		submitCmd(),
 		jobsCmd(),
