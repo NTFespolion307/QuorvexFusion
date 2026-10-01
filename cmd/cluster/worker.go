@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/NTFespolion307/QuorvexFusion/internal/hw"
 	"github.com/NTFespolion307/QuorvexFusion/internal/worker"
 )
 
@@ -71,6 +74,29 @@ saves its identity in --data-dir; later runs need no token.
 		},
 	}
 	wf.register(cmd)
+
+	cmd.AddCommand(&cobra.Command{
+		Use:   "probe",
+		Short: "Print the hardware and metrics this worker would report, then exit",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			info := hw.Probe()
+			s := hw.NewSampler(info)
+			s.Sample()
+			time.Sleep(time.Second) // CPU and network figures are rates over this interval
+			m := s.Sample()
+			out, err := protojson.MarshalOptions{Multiline: true, UseProtoNames: true}.Marshal(info)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("hardware: %s\n", out)
+			out, err = protojson.MarshalOptions{Multiline: true, UseProtoNames: true}.Marshal(m)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("metrics: %s\n", out)
+			return nil
+		},
+	})
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "join",

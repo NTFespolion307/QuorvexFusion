@@ -1,4 +1,4 @@
-# cluster
+# QuorvexFusion
 
 A self-hosted compute cluster in Go: machines on your LAN or anywhere on the
 internet join a shared pool of CPU, RAM, and GPUs, and jobs submitted to the
