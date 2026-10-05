@@ -18,7 +18,8 @@ export async function render(main, _params, ctx) {
         <label class="field">CPUs per task <input type="number" name="cpus" value="1" min="0.1" step="0.1"></label>
         <label class="field">Memory per task <input type="text" name="memory" placeholder="e.g. 4G (optional)"></label>
         <label class="field">GPUs per task <input type="number" name="gpus" value="0" min="0" step="1"></label>
-        <label class="field">Array <input type="text" name="array" placeholder="e.g. 1-500"></label>
+        <label class="field">Copies / array <input type="text" name="array" placeholder="16, or a range 1-500">
+          <span class="hint" id="array-hint">1 task</span></label>
         <label class="field">Retries <input type="number" name="retries" value="0" min="0" max="100"></label>
         <label class="field">Timeout <input type="text" name="timeout" placeholder="e.g. 30m, 2h"></label>
         <label class="field">Priority <input type="number" name="priority" value="0"></label>
@@ -41,6 +42,11 @@ export async function render(main, _params, ctx) {
   const toggle = (show) => form.classList.toggle("hidden", !show);
   document.getElementById("toggle-form").addEventListener("click", () => { toggle(form.classList.contains("hidden")); form.command.focus(); });
   document.getElementById("cancel-form").addEventListener("click", () => toggle(false));
+  // Show how many tasks the array field produces while typing.
+  form.array.addEventListener("input", () => {
+    const n = countArray(form.array.value);
+    document.getElementById("array-hint").textContent = n === null ? "e.g. 16, 1-500, 0-99:10 or 1,5,9" : `${n} task${n === 1 ? "" : "s"}`;
+  });
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
@@ -90,6 +96,23 @@ export async function render(main, _params, ctx) {
 }
 
 // --- form to JobSpec -----------------------------------------------------
+
+// countArray mirrors the server's ParseArray just enough to preview the
+// task count (null when the text is not valid yet).
+export function countArray(s) {
+  s = String(s || "").trim();
+  if (!s) return 1;
+  if (/^\d+$/.test(s)) return Number(s) >= 1 ? Number(s) : null;
+  const seen = new Set();
+  for (const part of s.split(",").map((p) => p.trim()).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:-(\d+))?(?::(\d+))?$/);
+    if (!m) return null;
+    const lo = Number(m[1]), hi = m[2] === undefined ? lo : Number(m[2]), step = Number(m[3] || 1);
+    if (hi < lo || step < 1 || hi - lo > 200000) return null;
+    for (let i = lo; i <= hi; i += step) seen.add(i);
+  }
+  return seen.size || null;
+}
 
 export function parseSize(s) {
   s = String(s || "").trim().toUpperCase().replace(/I?B$/, "");

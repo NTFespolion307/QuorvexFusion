@@ -23,7 +23,8 @@ type JobSpec struct {
 	TimeoutSec int64 `json:"timeout_seconds,omitempty"` // per attempt; 0 = none
 	Priority   int   `json:"priority,omitempty"`        // higher runs first
 
-	// Array is "", "1-500", "0-99:10" (step) or "1,4,9"; one task per index.
+	// Array is "", a count ("16" = indices 1..16), "1-500", "0-99:10"
+	// (step) or "1,4,9"; one task per index. See ParseArray.
 	Array string `json:"array,omitempty"`
 
 	Requires map[string]string `json:"requires,omitempty"` // node labels that must match
@@ -73,16 +74,34 @@ func (s *JobSpec) Normalize() error {
 func (s *JobSpec) allowEphemeral() bool { return s.AllowEphemeral == nil || *s.AllowEphemeral }
 func (s *JobSpec) allowRemote() bool    { return s.AllowRemote == nil || *s.AllowRemote }
 
-// ParseArray expands an array expression into sorted, unique indices.
-// "" yields the single index 0.
+// ParseArray expands an array expression into sorted, unique indices:
+//
+//	""         one task, index 0
+//	"16"       16 tasks, indices 1..16 (a bare number is a count)
+//	"0-99"     a range
+//	"0-99:10"  a range with a step
+//	"1,4,9"    a list (items may be ranges; "7," is the single index 7)
 func ParseArray(expr string) ([]int64, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return []int64{0}, nil
 	}
+	if n, err := strconv.ParseInt(expr, 10, 64); err == nil {
+		if n < 1 || n > maxArrayTasks {
+			return nil, fmt.Errorf("array count must be between 1 and %d", maxArrayTasks)
+		}
+		out := make([]int64, n)
+		for i := range out {
+			out[i] = int64(i) + 1
+		}
+		return out, nil
+	}
 	seen := map[int64]bool{}
 	for _, part := range strings.Split(expr, ",") {
 		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
 		rng, stepStr, hasStep := strings.Cut(part, ":")
 		step := int64(1)
 		if hasStep {
@@ -108,6 +127,9 @@ func ParseArray(expr string) ([]int64, error) {
 		for i := lo; i <= hi; i += step {
 			seen[i] = true
 		}
+	}
+	if len(seen) == 0 {
+		return nil, fmt.Errorf("array %q has no indices", expr)
 	}
 	out := make([]int64, 0, len(seen))
 	for i := range seen {

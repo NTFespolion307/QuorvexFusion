@@ -166,7 +166,9 @@ command (and env values) is replaced by the index.`,
 				}
 				return taskExit(state, code)
 			case follow || wait:
-				return waitJob(job.ID)
+				err := waitJob(job.ID)
+				fmt.Fprintf(os.Stderr, "Output of every task: cluster logs %s\n", job.ID)
+				return err
 			}
 			return nil
 		},
@@ -178,7 +180,7 @@ command (and env values) is replaced by the index.`,
 	f.IntVar(&spec.GPUs, "gpus", 0, "GPUs per task")
 	f.IntVar(&spec.Retries, "retries", 0, "retry a failed task up to this many times")
 	f.DurationVar(&timeout, "timeout", 0, "kill a task attempt after this long, e.g. 30m")
-	f.StringVar(&spec.Array, "array", "", "array job indices, e.g. 1-500, 0-99:10 or 1,5,9")
+	f.StringVar(&spec.Array, "array", "", "run many tasks: a count (16 = indices 1..16), a range 1-500, 0-99:10, or a list 1,5,9")
 	f.IntVar(&spec.Priority, "priority", 0, "higher priority jobs are scheduled first")
 	f.StringArrayVarP(&env, "env", "e", nil, "environment variable KEY=VALUE (repeatable)")
 	f.StringArrayVar(&require, "require", nil, "only run on nodes with label KEY=VALUE (repeatable)")
@@ -239,6 +241,42 @@ func waitJob(jobID string) error {
 }
 
 // --- logs ---
+
+// printJobLogs prints the output of every task of a job, each under a
+// header naming the task, its state and node.
+func printJobLogs(jobID string, stream controller.LogStream) error {
+	nodes := map[string]string{}
+	var nodeList []*controller.NodeView
+	if err := call("GET", "/api/v1/nodes", nil, &nodeList); err == nil {
+		for _, n := range nodeList {
+			nodes[n.ID] = n.Name
+		}
+	}
+	for offset := 0; ; offset += 1000 {
+		var tasks []*controller.TaskView
+		if err := call("GET", fmt.Sprintf("/api/v1/jobs/%s/tasks?limit=1000&offset=%d", url.PathEscape(jobID), offset), nil, &tasks); err != nil {
+			return err
+		}
+		for _, t := range tasks {
+			where := nodes[t.NodeID]
+			if where == "" {
+				where = t.NodeID
+			}
+			if where != "" {
+				where = " on " + where
+			}
+			fmt.Printf("==> %s (%s%s) <==\n", t.ID, t.State, where)
+			if t.Attempts > 0 {
+				if _, _, err := followTask(t.ID, stream, 0, false); err != nil {
+					return err
+				}
+			}
+		}
+		if len(tasks) < 1000 {
+			return nil
+		}
+	}
+}
 
 // resolveTask maps a job ID of a single-task job to its task ID.
 func resolveTask(ref string) (string, error) {
@@ -313,17 +351,28 @@ func logsCmd() *cobra.Command {
 	var stream string
 	var attempt int
 	cmd := &cobra.Command{
-		Use:   "logs <task-id | single-task job-id>",
-		Short: "Print a task's output",
-		Example: `  cluster logs j1a2b3c4d.0
+		Use:   "logs <task-id | job-id>",
+		Short: "Print the output of a task, or of every task of a job",
+		Example: `  cluster logs j1a2b3c4d          # every task of the job, one after another
+  cluster logs j1a2b3c4d.7        # one task of an array job
   cluster logs -f j1a2b3c4d.17 --stream stderr`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			taskID, err := resolveTask(args[0])
-			if err != nil {
-				return err
+			ref := args[0]
+			if !isTaskID(ref) {
+				var j controller.JobView
+				if err := call("GET", "/api/v1/jobs/"+url.PathEscape(ref), nil, &j); err != nil {
+					return err
+				}
+				if j.TaskCount > 1 {
+					if follow {
+						return fmt.Errorf("-f follows one task; pick one, e.g. %s", store.TaskID(j.ID, firstIndex(j.Spec.Array)))
+					}
+					return printJobLogs(j.ID, controller.LogStream(stream))
+				}
+				ref = store.TaskID(j.ID, firstIndex(j.Spec.Array))
 			}
-			_, _, err = followTask(taskID, controller.LogStream(stream), attempt, follow)
+			_, _, err := followTask(ref, controller.LogStream(stream), attempt, follow)
 			return err
 		},
 	}

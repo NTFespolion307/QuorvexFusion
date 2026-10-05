@@ -343,14 +343,21 @@ func TestRestartRestoresReservations(t *testing.T) {
 }
 
 func TestParseArray(t *testing.T) {
-	cases := map[string]int{"": 1, "1-500": 500, "0-99:10": 10, "1,4,9": 3, "1-3,2-4": 4}
+	cases := map[string]int{"": 1, "16": 16, "1": 1, "1-500": 500, "0-99:10": 10, "1,4,9": 3, "1-3,2-4": 4, "7,": 1}
 	for expr, want := range cases {
 		got, err := ParseArray(expr)
 		if err != nil || len(got) != want {
 			t.Errorf("ParseArray(%q) = %d indices, %v; want %d", expr, len(got), err, want)
 		}
 	}
-	for _, bad := range []string{"a", "5-1", "1-10:0", "-3", "0-200000"} {
+	// A bare number is a count: "16" means indices 1..16.
+	if got, _ := ParseArray("16"); got[0] != 1 || got[15] != 16 {
+		t.Errorf(`ParseArray("16") = %v, want 1..16`, got)
+	}
+	if got, _ := ParseArray("7,"); got[0] != 7 {
+		t.Errorf(`ParseArray("7,") = %v, want [7]`, got)
+	}
+	for _, bad := range []string{"a", "5-1", "1-10:0", "-3", "0", "0-200000", "200000", ","} {
 		if _, err := ParseArray(bad); err == nil {
 			t.Errorf("ParseArray(%q) accepted", bad)
 		}
