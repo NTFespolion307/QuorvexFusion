@@ -6,6 +6,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/NTFespolion307/QuorvexFusion/internal/blobstore"
+	"github.com/NTFespolion307/QuorvexFusion/internal/files"
 )
 
 // JobSpec is what a user submits. It is stored as JSON with the job, and
@@ -33,6 +36,46 @@ type JobSpec struct {
 	// Nil means allowed. Set to false to keep the job on stable/local nodes.
 	AllowEphemeral *bool `json:"allow_ephemeral,omitempty"`
 	AllowRemote    *bool `json:"allow_remote,omitempty"`
+
+	// Inputs are placed in each task's working directory before it starts.
+	Inputs []InputSpec `json:"inputs,omitempty"`
+	// Outputs are globs (relative to the working directory, "**" allowed)
+	// uploaded back to the controller after each task.
+	Outputs []string `json:"outputs,omitempty"`
+}
+
+// InputSpec is one input file: either uploaded content (SHA256, stored on
+// the controller and downloaded by workers) or a path in the nodes' shared
+// storage (Shared), which is linked without any transfer.
+type InputSpec struct {
+	Path   string `json:"path"`             // destination, relative to the working directory
+	SHA256 string `json:"sha256,omitempty"` // uploaded content
+	Size   int64  `json:"size,omitempty"`
+	Mode   uint32 `json:"mode,omitempty"`   // permission bits; 0 = 0644
+	Shared string `json:"shared,omitempty"` // path relative to the shared storage root
+}
+
+const (
+	maxInputs  = 100000
+	maxOutputs = 100
+)
+
+func (s *JobSpec) needsShared() bool {
+	for _, in := range s.Inputs {
+		if in.Shared != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// inputBytes is the total size of transferred inputs.
+func (s *JobSpec) inputBytes() int64 {
+	var n int64
+	for _, in := range s.Inputs {
+		n += in.Size
+	}
+	return n
 }
 
 const (
@@ -62,11 +105,60 @@ func (s *JobSpec) Normalize() error {
 	if _, err := ParseArray(s.Array); err != nil {
 		return err
 	}
+	if err := s.normalizeFiles(); err != nil {
+		return err
+	}
 	if s.Name == "" {
 		s.Name = s.Command
 		if len(s.Name) > 60 {
 			s.Name = s.Name[:57] + "..."
 		}
+	}
+	return nil
+}
+
+// normalizeFiles validates input and output paths. Whether uploaded inputs
+// exist is checked by the controller (it owns the blob store).
+func (s *JobSpec) normalizeFiles() error {
+	if len(s.Inputs) > maxInputs {
+		return fmt.Errorf("at most %d input files", maxInputs)
+	}
+	seen := map[string]bool{}
+	for i := range s.Inputs {
+		in := &s.Inputs[i]
+		p, err := files.CleanRel(in.Path)
+		if err != nil {
+			return fmt.Errorf("input: %w", err)
+		}
+		if seen[p] {
+			return fmt.Errorf("input %q given twice", p)
+		}
+		seen[p] = true
+		in.Path = p
+		switch {
+		case in.Shared != "" && in.SHA256 != "":
+			return fmt.Errorf("input %q: give either sha256 or shared, not both", p)
+		case in.Shared != "":
+			if in.Shared, err = files.CleanRel(in.Shared); err != nil {
+				return fmt.Errorf("shared input: %w", err)
+			}
+		case !blobstore.ValidSHA(in.SHA256):
+			return fmt.Errorf("input %q: missing or invalid sha256", p)
+		}
+		if in.Mode == 0 {
+			in.Mode = 0o644
+		}
+		in.Mode &= 0o777
+	}
+	if len(s.Outputs) > maxOutputs {
+		return fmt.Errorf("at most %d output patterns", maxOutputs)
+	}
+	for i, o := range s.Outputs {
+		o = strings.TrimSpace(o)
+		if _, err := files.CleanRel(strings.ReplaceAll(o, "**", "x")); err != nil {
+			return fmt.Errorf("output: %w", err)
+		}
+		s.Outputs[i] = o
 	}
 	return nil
 }

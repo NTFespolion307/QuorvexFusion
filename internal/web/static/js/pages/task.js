@@ -1,7 +1,9 @@
 // Task view: attempts and the live log of one task.
 
 import { api } from "../api.js";
-import { html, setHTML, toast, stateBadge, since, dateTime, coalesce, confirmDialog } from "../util.js";
+import { html, setHTML, toast, stateBadge, since, dateTime, coalesce, confirmDialog, bytes, bar, pct } from "../util.js";
+import { outputLink } from "./jobs.js";
+import { progressText } from "./job.js";
 
 const TERMINAL = new Set(["succeeded", "failed", "canceled"]);
 
@@ -50,6 +52,9 @@ export async function render(main, [id], ctx) {
         ${task.error ? html`<dt>Error</dt><dd>${task.error}</dd>` : ""}
         <dt>Started</dt><dd>${dateTime(task.started_at)}</dd>
         <dt>Duration</dt><dd>${since(task.started_at, task.finished_at)}</dd>
+        ${task.progress ? html`<dt>Transfer</dt><dd>${progressText(task.progress)}${bar(pct(task.progress.done_bytes, task.progress.total_bytes), false, true)}</dd>` : ""}
+        ${(task.outputs || []).length ? html`<dt>Output files</dt><dd>${task.outputs.map((o) =>
+          html`<a href="${outputLink(o)}">${o.path}</a> <span class="faint small">${bytes(o.size)}</span><br>`)}</dd>` : ""}
       </dl>
       ${(task.attempt_list || []).length > 1 ? html`<h3 class="section">Attempts</h3><div class="table-wrap"><table>
         <thead><tr><th>#</th><th>State</th><th>Node</th><th>Exit</th><th>Duration</th><th>Detail</th></tr></thead>
@@ -127,4 +132,7 @@ export async function render(main, [id], ctx) {
   }, 1000);
   ctx.cleanup(() => clearInterval(timer));
   ctx.on("jobs", coalesce(loadTask));
+  // Transfer progress isn't an event of its own; refresh while it shows.
+  const progressTimer = setInterval(() => { if (!stopped && task?.progress) loadTask(); }, 1500);
+  ctx.cleanup(() => clearInterval(progressTimer));
 }

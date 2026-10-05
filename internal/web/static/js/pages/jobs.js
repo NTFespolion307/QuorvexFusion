@@ -2,6 +2,13 @@
 
 import { api } from "../api.js";
 import { html, setHTML, toast, stateBadge, ago, num, bytes, bar, pct, parseKV, coalesce, confirmDialog } from "../util.js";
+export { outputLink };
+
+// Link to download one output file of a task.
+function outputLink(o) {
+  const path = o.path.split("/").map(encodeURIComponent).join("/");
+  return `/api/v1/tasks/${encodeURIComponent(o.task_id)}/files/${path}`;
+}
 
 export async function render(main, _params, ctx) {
   setHTML(main, html`
@@ -11,8 +18,8 @@ export async function render(main, _params, ctx) {
     </div>
     <form class="card stack hidden" id="submit">
       <h2>Submit a job</h2>
-      <label class="field">Command (runs with /bin/sh -c; {i} is replaced by the array index)
-        <textarea name="command" rows="3" required placeholder="python3 simulate.py --seed {i}"></textarea></label>
+      <label class="field"><span id="command-label">Command (runs with /bin/sh -c; {i} is replaced by the array index)</span>
+        <textarea name="command" rows="3" placeholder="python3 simulate.py --seed {i}"></textarea></label>
       <div class="form-grid">
         <label class="field">Name <input type="text" name="name" placeholder="defaults to the command"></label>
         <label class="field">CPUs per task <input type="number" name="cpus" value="1" min="0.1" step="0.1"></label>
@@ -32,7 +39,21 @@ export async function render(main, _params, ctx) {
           <label class="check"><input type="checkbox" name="noremote"> Never run on remote nodes</label>
         </div>
       </div>
-      <p class="hint">Input/output files and Docker images arrive with the next milestones.</p>
+      <h3 class="section">Files</h3>
+      <div class="form-grid">
+        <label class="field">Script to run (optional)
+          <input type="file" name="script">
+          <span class="hint">Uploaded and run; the command box then holds its arguments.</span></label>
+        <label class="field">Input files <input type="file" name="files" multiple>
+          <span class="hint">Placed in each task's working directory.</span></label>
+        <label class="field">Input folder <input type="file" name="folder" webkitdirectory multiple>
+          <span class="hint">Kept as a folder of the same name.</span></label>
+        <label class="field">Outputs to collect
+          <input type="text" name="outputs" placeholder="frames/*.png, results/**">
+          <span class="hint">Globs relative to the working directory.</span></label>
+      </div>
+      <div class="hidden" id="upload-progress"><div class="small dim" id="upload-text"></div><div class="bar thick"><span id="upload-bar" class="ok" style="width:0%"></span></div></div>
+      <p class="hint">Docker images arrive with the next milestone.</p>
       <div class="row"><button class="btn primary" type="submit">Submit</button>
         <button class="btn ghost" type="button" id="cancel-form">Cancel</button></div>
     </form>
@@ -47,14 +68,28 @@ export async function render(main, _params, ctx) {
     const n = countArray(form.array.value);
     document.getElementById("array-hint").textContent = n === null ? "e.g. 16, 1-500, 0-99:10 or 1,5,9" : `${n} task${n === 1 ? "" : "s"}`;
   });
+  form.script.addEventListener("change", () => {
+    document.getElementById("command-label").textContent = form.script.files.length
+      ? `Arguments for ${form.script.files[0].name} ({i} is replaced by the array index)`
+      : "Command (runs with /bin/sh -c; {i} is replaced by the array index)";
+  });
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    const submit = form.querySelector("button[type=submit]");
+    submit.disabled = true;
     try {
-      const job = await api.post("/jobs", specFromForm(form.elements));
+      const spec = specFromForm(form.elements);
+      const script = form.script.files[0];
+      if (!script && !spec.command) throw new Error("Enter a command, or choose a script");
+      spec.inputs = await uploadInputs(form);
+      if (script) spec.command = (await scriptCommand(script)) + (spec.command ? " " + spec.command : "");
+      const job = await api.post("/jobs", spec);
       toast(`Submitted ${job.id} (${job.task_count} task${job.task_count === 1 ? "" : "s"})`, "ok");
       location.hash = "#/jobs/" + job.id;
     } catch (err) {
       toast(err.message, "err");
+    } finally {
+      submit.disabled = false;
     }
   });
 
@@ -93,6 +128,74 @@ export async function render(main, _params, ctx) {
   });
   await refresh();
   ctx.on("jobs", refresh);
+}
+
+// --- input files ---------------------------------------------------------
+
+// uploadInputs sends the chosen files to the controller (which hashes and
+// de-duplicates them) and returns the job's input list.
+async function uploadInputs(form) {
+  const items = [];
+  const script = form.script.files[0];
+  if (script) items.push({ file: script, path: script.name, mode: 0o755 });
+  for (const f of form.files.files) items.push({ file: f, path: f.name });
+  for (const f of form.folder.files) items.push({ file: f, path: f.webkitRelativePath || f.name });
+  if (!items.length) return [];
+
+  const total = items.reduce((n, it) => n + it.file.size, 0);
+  const box = document.getElementById("upload-progress");
+  const text = document.getElementById("upload-text");
+  const barEl = document.getElementById("upload-bar");
+  box.classList.remove("hidden");
+  let done = 0;
+  const inputs = [];
+  try {
+    for (const it of items) {
+      text.textContent = `Uploading ${it.path}`;
+      const res = await uploadOne(it.file, (n) => {
+        barEl.style.width = (100 * (done + n) / Math.max(total, 1)).toFixed(1) + "%";
+      });
+      done += it.file.size;
+      inputs.push({ path: it.path, sha256: res.sha256, size: res.size, mode: it.mode || 0o644 });
+    }
+    text.textContent = `Uploaded ${items.length} file(s), ${bytes(total)}`;
+  } catch (err) {
+    box.classList.add("hidden");
+    throw err;
+  }
+  return inputs;
+}
+
+// uploadOne posts a file with upload progress (fetch can't report it).
+function uploadOne(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/v1/blobs");
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onload = () => {
+      if (xhr.status === 401) { location.href = "/login"; return; }
+      let body = {};
+      try { body = JSON.parse(xhr.responseText); } catch (e) { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body);
+      else reject(new Error(body.error || `upload of ${file.name} failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error(`upload of ${file.name} failed: network error`));
+    xhr.send(file);
+  });
+}
+
+function shellQuote(s) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\"'\"'") + "'";
+}
+
+// scriptCommand mirrors the CLI: run directly with a "#!" line, else pick
+// an interpreter from the extension.
+async function scriptCommand(file) {
+  const name = shellQuote(file.name);
+  if ((await file.slice(0, 2).text()) === "#!") return "./" + name;
+  const ext = file.name.split(".").pop().toLowerCase();
+  const interp = { py: "python3", sh: "bash", bash: "bash", r: "Rscript", js: "node", pl: "perl" }[ext];
+  return interp ? `${interp} ${name}` : "./" + name;
 }
 
 // --- form to JobSpec -----------------------------------------------------
@@ -148,6 +251,7 @@ function specFromForm(f) {
     env: parseKV(f.env.value),
     requires: parseKV(f.require.value),
     prefers: parseKV(f.prefer.value),
+    outputs: f.outputs.value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
   };
   if (f.noephemeral.checked) spec.allow_ephemeral = false;
   if (f.noremote.checked) spec.allow_remote = false;

@@ -2,8 +2,14 @@
 
 import { api } from "../api.js";
 import { html, setHTML, toast, stateBadge, since, num, bytes, bar, pct, dateTime, coalesce, confirmDialog, kvText } from "../util.js";
+import { outputLink } from "./jobs.js";
 
 const PAGE = 500;
+
+export function progressText(p) {
+  const what = p.phase === "upload" ? "uploading outputs" : "downloading inputs";
+  return `${what} ${pct(p.done_bytes, p.total_bytes).toFixed(0)}% (${bytes(p.done_bytes)} of ${bytes(p.total_bytes)})`;
+}
 
 export async function render(main, [id], ctx) {
   let state = "", offset = 0;
@@ -18,6 +24,11 @@ export async function render(main, [id], ctx) {
     <div class="grid cols-2">
       <div class="card"><h2 id="name"></h2><div id="spec"></div></div>
       <div class="card"><h2>Progress</h2><div id="progress"></div></div>
+    </div>
+    <div class="card section hidden" id="outputs-card">
+      <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Output files</h2><span style="flex:1"></span>
+        <a class="btn sm" id="zip">Download all (zip)</a></div>
+      <div id="outputs"></div>
     </div>
     <div class="card section">
       <div class="row" style="margin-bottom:10px"><h2 style="margin:0">Tasks</h2><span class="spacer" style="flex:1"></span>
@@ -44,7 +55,22 @@ export async function render(main, [id], ctx) {
     if (tasks.some((t) => t.node_id && !nodeNames[t.node_id])) await loadNodes();
     drawJob(job);
     drawTasks(tasks, job);
+    if (job.spec.outputs?.length) drawOutputs(await api.get(`/jobs/${encodeURIComponent(id)}/outputs`), job);
   });
+
+  const drawOutputs = (outs, j) => {
+    document.getElementById("outputs-card").classList.remove("hidden");
+    document.getElementById("zip").href = `/api/v1/jobs/${encodeURIComponent(id)}/outputs.zip`;
+    const totalBytes = outs.reduce((n, o) => n + o.size, 0);
+    const shown = outs.slice(0, 200);
+    setHTML(document.getElementById("outputs"), outs.length ? html`
+      <p class="small dim">${outs.length} file(s), ${bytes(totalBytes)}${outs.length > shown.length ? " (first 200 listed)" : ""}.
+        From a terminal: <code>cluster outputs ${id}</code></p>
+      <div class="table-wrap"><table><thead><tr>${j.task_count > 1 ? html`<th>Task</th>` : ""}<th>File</th><th>Size</th></tr></thead>
+      <tbody>${shown.map((o) => html`<tr>${j.task_count > 1 ? html`<td class="mono">${o.index}</td>` : ""}
+        <td class="truncate"><a href="${outputLink(o)}">${o.path}</a></td><td class="nowrap">${bytes(o.size)}</td></tr>`)}</tbody></table></div>`
+      : html`<div class="empty">No output files yet (patterns: ${j.spec.outputs.join(", ")}).</div>`);
+  };
 
   const drawJob = (j) => {
     const s = j.spec, c = j.counts;
@@ -61,6 +87,9 @@ export async function render(main, [id], ctx) {
       <dt>Timeout</dt><dd>${s.timeout_seconds ? s.timeout_seconds + " s" : "none"}</dd>
       ${s.priority ? html`<dt>Priority</dt><dd>${s.priority}</dd>` : ""}
       ${s.env ? html`<dt>Environment</dt><dd class="mono small">${kvText(s.env, "  ")}</dd>` : ""}
+      ${s.inputs?.length ? html`<dt>Inputs</dt><dd>${s.inputs.length} file(s)${s.inputs.some((i) => i.size) ? ", " + bytes(s.inputs.reduce((n, i) => n + (i.size || 0), 0)) : ""}:
+        <span class="small dim">${s.inputs.slice(0, 8).map((i) => i.path).join(", ")}${s.inputs.length > 8 ? ", …" : ""}</span></dd>` : ""}
+      ${s.outputs?.length ? html`<dt>Outputs</dt><dd class="mono small">${s.outputs.join("  ")}</dd>` : ""}
       ${s.requires ? html`<dt>Requires</dt><dd>${kvText(s.requires)}</dd>` : ""}
       ${s.prefers ? html`<dt>Prefers</dt><dd>${kvText(s.prefers)}</dd>` : ""}
       ${s.allow_ephemeral === false ? html`<dt>Ephemeral nodes</dt><dd>not allowed</dd>` : ""}
@@ -83,10 +112,10 @@ export async function render(main, [id], ctx) {
       <tbody>${tasks.map((t) => html`<tr class="clickable" data-href="#/tasks/${t.id}">
         <td class="mono"><a href="#/tasks/${t.id}">${t.id}</a></td>
         <td>${stateBadge(t.state)}</td><td>${t.attempts}</td>
-        <td>${t.node_id ? html`<a href="#/nodes/${t.node_id}">${nodeNames[t.node_id] || t.node_id}</a>` : "-"}</td>
+        <td class="nowrap">${t.node_id ? html`<a href="#/nodes/${t.node_id}">${nodeNames[t.node_id] || t.node_id}</a>` : "-"}</td>
         <td>${t.exit_code ?? "-"}</td>
         <td class="nowrap">${since(t.started_at, t.finished_at)}</td>
-        <td class="truncate ${t.error ? "" : "dim"}">${t.pending_reason || t.error || ""}</td>
+        <td class="truncate ${t.error ? "" : "dim"}">${t.progress ? progressText(t.progress) : (t.pending_reason || t.error || "")}</td>
       </tr>`)}</tbody></table></div>` : html`<div class="empty">No tasks${state ? " in this state" : ""}.</div>`);
     const pager = document.getElementById("pager");
     const more = tasks.length === PAGE;

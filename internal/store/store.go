@@ -166,6 +166,18 @@ CREATE TABLE sessions (
 	ip         TEXT NOT NULL DEFAULT ''
 );
 `,
+	// 5: output files of tasks (from the attempt that completed the task)
+	`
+CREATE TABLE task_outputs (
+	task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+	path    TEXT NOT NULL,
+	sha256  TEXT NOT NULL,
+	size    INTEGER NOT NULL,
+	mode    INTEGER NOT NULL,
+	PRIMARY KEY (task_id, path)
+);
+CREATE INDEX task_outputs_sha ON task_outputs(sha256);
+`,
 }
 
 func (s *Store) migrate() error {

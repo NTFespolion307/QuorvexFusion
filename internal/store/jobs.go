@@ -508,6 +508,8 @@ type AttemptOutcome struct {
 	TaskState    TaskState
 	CountFailure bool
 	CountLost    bool
+	// Outputs replace the task's stored outputs if the outcome is applied.
+	Outputs []OutputFile
 }
 
 // FinishAttempt closes an active attempt and updates its task, atomically.
@@ -532,12 +534,94 @@ func (s *Store) FinishAttempt(attemptID string, o AttemptOutcome) error {
 	if o.TaskState.Terminal() {
 		finished = ms(o.Finished)
 	}
-	if _, err := tx.Exec(`UPDATE tasks SET state = ?, exit_code = ?, error = ?, finished_at = ?,
+	res, err := tx.Exec(`UPDATE tasks SET state = ?, exit_code = ?, error = ?, finished_at = ?,
 			failures = failures + ?, lost = lost + ?
 		WHERE id = ? AND attempt_id = ? AND state IN (?, ?)`,
 		o.TaskState, nullInt(o.ExitCode), o.Error, finished, boolInt(o.CountFailure), boolInt(o.CountLost),
-		taskID, attemptID, TaskAssigned, TaskRunning); err != nil {
+		taskID, attemptID, TaskAssigned, TaskRunning)
+	if err != nil {
 		return err
 	}
+	// Outputs belong to the task only if this attempt's outcome was applied
+	// (the same exactly-once rule as the result itself).
+	if n, _ := res.RowsAffected(); n > 0 && len(o.Outputs) > 0 {
+		if _, err := tx.Exec(`DELETE FROM task_outputs WHERE task_id = ?`, taskID); err != nil {
+			return err
+		}
+		for _, f := range o.Outputs {
+			if _, err := tx.Exec(`INSERT INTO task_outputs (task_id, path, sha256, size, mode) VALUES (?, ?, ?, ?, ?)`,
+				taskID, f.Path, f.SHA256, f.Size, f.Mode); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
+}
+
+// OutputFile is one stored output of a task.
+type OutputFile struct {
+	TaskID string `json:"task_id"`
+	Index  int64  `json:"index"` // the task's array index
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+	Mode   uint32 `json:"mode"`
+}
+
+func (s *Store) queryOutputs(where string, arg any) ([]*OutputFile, error) {
+	rows, err := s.db.Query(`SELECT o.task_id, t.idx, o.path, o.sha256, o.size, o.mode
+		FROM task_outputs o JOIN tasks t ON t.id = o.task_id WHERE `+where+` ORDER BY t.idx, o.path`, arg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*OutputFile
+	for rows.Next() {
+		var f OutputFile
+		if err := rows.Scan(&f.TaskID, &f.Index, &f.Path, &f.SHA256, &f.Size, &f.Mode); err != nil {
+			return nil, err
+		}
+		out = append(out, &f)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) TaskOutputs(taskID string) ([]*OutputFile, error) {
+	return s.queryOutputs(`o.task_id = ?`, taskID)
+}
+
+func (s *Store) JobOutputs(jobID string) ([]*OutputFile, error) {
+	return s.queryOutputs(`t.job_id = ?`, jobID)
+}
+
+// ReferencedBlobs returns the content hashes still in use: every job's
+// spec (for its inputs) and every stored output.
+func (s *Store) ReferencedBlobs() (specs []string, outputs map[string]bool, err error) {
+	rows, err := s.db.Query(`SELECT spec FROM jobs`)
+	if err != nil {
+		return nil, nil, err
+	}
+	for rows.Next() {
+		var spec string
+		if err := rows.Scan(&spec); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		specs = append(specs, spec)
+	}
+	rows.Close()
+	outputs = map[string]bool{}
+	rows, err = s.db.Query(`SELECT DISTINCT sha256 FROM task_outputs`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, nil, err
+		}
+		outputs[sha] = true
+	}
+	return specs, outputs, rows.Err()
 }

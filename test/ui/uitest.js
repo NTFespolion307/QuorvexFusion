@@ -76,6 +76,34 @@ async function login(page) {
     await page.waitForFunction(() => document.querySelector("#log")?.textContent.includes("from the UI 2"), null, { timeout: 10000 });
     check("task log shows output", true);
 
+    // A job with an uploaded input file, a script and an output pattern.
+    await page.goto(base + "/#/jobs");
+    await page.click("#toggle-form");
+    await page.setInputFiles("input[name=script]", { name: "shout.sh", mimeType: "text/plain",
+      buffer: Buffer.from("#!/bin/sh\nmkdir -p out\ntr a-z A-Z < hello.txt > out/HELLO.txt\necho script says $1\n") });
+    await page.setInputFiles("input[name=files]", { name: "hello.txt", mimeType: "text/plain", buffer: Buffer.from("hello world\n") });
+    await page.fill("textarea[name=command]", "first-arg");
+    await page.fill("input[name=outputs]", "out/*");
+    await page.fill("input[name=cpus]", "0.5");
+    await page.click("#submit button[type=submit]");
+    await page.waitForURL(/#\/jobs\/j[0-9a-f]+$/);
+    await page.waitForFunction(() => document.querySelector("#state")?.textContent.match(/succeeded|failed/), null, { timeout: 30000 });
+    check("job with files succeeds", (await page.textContent("#state")).includes("succeeded"));
+    await page.waitForSelector("#outputs a");
+    const href = await page.getAttribute("#outputs a", "href");
+    const content = await page.evaluate(async (u) => (await fetch(u)).text(), href);
+    check("output file downloads with the right content", content === "HELLO WORLD\n", JSON.stringify(content));
+    const zipHead = await page.evaluate(async () => {
+      const u = document.getElementById("zip").href;
+      const b = new Uint8Array(await (await fetch(u)).arrayBuffer());
+      return String.fromCharCode(b[0], b[1]) + ":" + b.length;
+    });
+    check("outputs zip downloads", zipHead.startsWith("PK:"), zipHead);
+    await page.screenshot({ path: `${out}/dark-job-files.png`, fullPage: true });
+    await page.click("#tasks tbody tr >> nth=0");
+    await page.waitForFunction(() => document.querySelector("#log")?.textContent.includes("script says first-arg"), null, { timeout: 10000 });
+    check("uploaded script ran with its argument", true);
+
     // Live log of a running task.
     await page.goto(`${base}/#/tasks/${LOG_TASK_ID}`);
     await page.waitForFunction(() => /line [3-9]/.test(document.querySelector("#log")?.textContent || ""), null, { timeout: 20000 });

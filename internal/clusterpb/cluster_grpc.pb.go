@@ -25,8 +25,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NodeService_Join_FullMethodName    = "/cluster.v1.NodeService/Join"
-	NodeService_Connect_FullMethodName = "/cluster.v1.NodeService/Connect"
+	NodeService_Join_FullMethodName         = "/cluster.v1.NodeService/Join"
+	NodeService_Connect_FullMethodName      = "/cluster.v1.NodeService/Connect"
+	NodeService_Download_FullMethodName     = "/cluster.v1.NodeService/Download"
+	NodeService_UploadStatus_FullMethodName = "/cluster.v1.NodeService/UploadStatus"
+	NodeService_Upload_FullMethodName       = "/cluster.v1.NodeService/Upload"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -48,6 +51,13 @@ type NodeServiceClient interface {
 	// Connect is the long-lived control stream of an approved node. The first
 	// worker message must be a Hello. Any message counts as a heartbeat.
 	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[WorkerMessage, ControllerMessage], error)
+	// Download streams a stored file (a task input) from offset onward. A
+	// node may only download inputs of tasks assigned to it.
+	Download(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error)
+	// UploadStatus says how much of a file the controller already has.
+	UploadStatus(ctx context.Context, in *UploadStatusRequest, opts ...grpc.CallOption) (*UploadStatusResponse, error)
+	// Upload sends a file (a task output); the first chunk names it.
+	Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadChunk, UploadResponse], error)
 }
 
 type nodeServiceClient struct {
@@ -81,6 +91,48 @@ func (c *nodeServiceClient) Connect(ctx context.Context, opts ...grpc.CallOption
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type NodeService_ConnectClient = grpc.BidiStreamingClient[WorkerMessage, ControllerMessage]
 
+func (c *nodeServiceClient) Download(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &NodeService_ServiceDesc.Streams[1], NodeService_Download_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadRequest, FileChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type NodeService_DownloadClient = grpc.ServerStreamingClient[FileChunk]
+
+func (c *nodeServiceClient) UploadStatus(ctx context.Context, in *UploadStatusRequest, opts ...grpc.CallOption) (*UploadStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UploadStatusResponse)
+	err := c.cc.Invoke(ctx, NodeService_UploadStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) Upload(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadChunk, UploadResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &NodeService_ServiceDesc.Streams[2], NodeService_Upload_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[UploadChunk, UploadResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type NodeService_UploadClient = grpc.ClientStreamingClient[UploadChunk, UploadResponse]
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -100,6 +152,13 @@ type NodeServiceServer interface {
 	// Connect is the long-lived control stream of an approved node. The first
 	// worker message must be a Hello. Any message counts as a heartbeat.
 	Connect(grpc.BidiStreamingServer[WorkerMessage, ControllerMessage]) error
+	// Download streams a stored file (a task input) from offset onward. A
+	// node may only download inputs of tasks assigned to it.
+	Download(*DownloadRequest, grpc.ServerStreamingServer[FileChunk]) error
+	// UploadStatus says how much of a file the controller already has.
+	UploadStatus(context.Context, *UploadStatusRequest) (*UploadStatusResponse, error)
+	// Upload sends a file (a task output); the first chunk names it.
+	Upload(grpc.ClientStreamingServer[UploadChunk, UploadResponse]) error
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -115,6 +174,15 @@ func (UnimplementedNodeServiceServer) Join(context.Context, *JoinRequest) (*Join
 }
 func (UnimplementedNodeServiceServer) Connect(grpc.BidiStreamingServer[WorkerMessage, ControllerMessage]) error {
 	return status.Error(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedNodeServiceServer) Download(*DownloadRequest, grpc.ServerStreamingServer[FileChunk]) error {
+	return status.Error(codes.Unimplemented, "method Download not implemented")
+}
+func (UnimplementedNodeServiceServer) UploadStatus(context.Context, *UploadStatusRequest) (*UploadStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UploadStatus not implemented")
+}
+func (UnimplementedNodeServiceServer) Upload(grpc.ClientStreamingServer[UploadChunk, UploadResponse]) error {
+	return status.Error(codes.Unimplemented, "method Upload not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -162,6 +230,42 @@ func _NodeService_Connect_Handler(srv interface{}, stream grpc.ServerStream) err
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type NodeService_ConnectServer = grpc.BidiStreamingServer[WorkerMessage, ControllerMessage]
 
+func _NodeService_Download_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(NodeServiceServer).Download(m, &grpc.GenericServerStream[DownloadRequest, FileChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type NodeService_DownloadServer = grpc.ServerStreamingServer[FileChunk]
+
+func _NodeService_UploadStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UploadStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).UploadStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_UploadStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).UploadStatus(ctx, req.(*UploadStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_Upload_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(NodeServiceServer).Upload(&grpc.GenericServerStream[UploadChunk, UploadResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type NodeService_UploadServer = grpc.ClientStreamingServer[UploadChunk, UploadResponse]
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -173,12 +277,26 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Join",
 			Handler:    _NodeService_Join_Handler,
 		},
+		{
+			MethodName: "UploadStatus",
+			Handler:    _NodeService_UploadStatus_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Connect",
 			Handler:       _NodeService_Connect_Handler,
 			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Download",
+			Handler:       _NodeService_Download_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Upload",
+			Handler:       _NodeService_Upload_Handler,
 			ClientStreams: true,
 		},
 	},

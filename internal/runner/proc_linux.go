@@ -169,3 +169,6 @@ func exitStatus(err error, memLimited bool) (int32, string) {
 	}
 	return -1, err.Error()
 }
+
+// chownTo gives a file or directory to the task user.
+func chownTo(path string, u *taskUser) error { return os.Lchown(path, int(u.uid), int(u.gid)) }

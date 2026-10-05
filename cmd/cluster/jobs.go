@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -112,21 +114,60 @@ func submitCmd() *cobra.Command {
 		noEphemeral          bool
 		noRemote             bool
 		wait, follow         bool
+		inputs, sharedInputs []string
+		script               string
 	)
 	cmd := &cobra.Command{
 		Use:   "submit [flags] -- command [args...]",
 		Short: "Submit a job",
 		Long: `Submit a job. The command runs with /bin/sh -c on whichever node the
 scheduler picks. With --array, one task runs per index and {i} in the
-command (and env values) is replaced by the index.`,
+command (and env values) is replaced by the index.
+
+Files: --input copies files or folders from this computer into every
+task's working directory (uploaded once, cached on the nodes); --output
+names files the tasks produce, collected with 'cluster outputs <job>'.
+--script uploads a script and runs it (the command line becomes its
+arguments).`,
 		Example: `  cluster submit --cpus 4 -- ./render.sh 12
   cluster submit --array 1-500 --cpus 1 -- 'python3 sim.py --seed {i}'
-  cluster submit --gpus 1 --memory 16G --timeout 2h -- python3 train.py
+  cluster submit --script train.py --input data/ --output 'model/*' --gpus 1 -- --epochs 10
+  cluster submit --array 1-2500:10 --input scene.blend --output 'frames/*' -- \
+      'blender -b scene.blend -o //frames/f_#### -s {i} -e $(( {i} + 9 )) -a'
   cluster submit -f -- uname -a`,
-		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			spec.Command = joinCommand(args)
-			var err error
+			if script == "" && len(args) == 0 {
+				return errors.New("give a command after --, or a --script")
+			}
+			local, err := collectInputs(inputs)
+			if err != nil {
+				return err
+			}
+			if script != "" {
+				name := filepath.Base(script)
+				run, err := scriptCommand(script, name)
+				if err != nil {
+					return err
+				}
+				local = append(local, localInput{local: script, spec: controller.InputSpec{Path: name, Mode: 0o755}})
+				// With a script, every argument is passed to it literally.
+				for _, a := range args {
+					run += " " + shellQuote(a)
+				}
+				spec.Command = run
+			} else {
+				spec.Command = joinCommand(args)
+			}
+			if spec.Inputs, err = uploadInputs(local); err != nil {
+				return err
+			}
+			for _, si := range sharedInputs {
+				src, dest := splitSrcDest(si)
+				if dest == "" {
+					dest = path.Base(filepath.ToSlash(src))
+				}
+				spec.Inputs = append(spec.Inputs, controller.InputSpec{Path: dest, Shared: filepath.ToSlash(src)})
+			}
 			if spec.MemoryBytes, err = parseBytes(memory); err != nil {
 				return err
 			}
@@ -187,6 +228,10 @@ command (and env values) is replaced by the index.`,
 	f.StringArrayVar(&prefer, "prefer", nil, "prefer nodes with label KEY=VALUE (repeatable)")
 	f.BoolVar(&noEphemeral, "no-ephemeral", false, "never run on ephemeral (rented/cloud) nodes")
 	f.BoolVar(&noRemote, "no-remote", false, "never run on remote nodes")
+	f.StringArrayVarP(&inputs, "input", "i", nil, "file or folder to place in each task's working directory, SRC or SRC:DEST (repeatable)")
+	f.StringArrayVar(&sharedInputs, "shared-input", nil, "path in the nodes' shared storage, linked without transfer: PATH or PATH:DEST (repeatable)")
+	f.StringArrayVarP(&spec.Outputs, "output", "o", nil, "files to collect after each task, a glob like 'out/*.png' or 'results/**' (repeatable)")
+	f.StringVar(&script, "script", "", "upload this script and run it; arguments after -- are passed to it")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until all tasks finish")
 	f.BoolVarP(&follow, "follow", "f", false, "stream output (single-task jobs) or wait for the job")
 	return cmd

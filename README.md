@@ -12,8 +12,8 @@ pool are scheduled onto them automatically.
 
 > **Status:** under active development. Working today: joining nodes,
 > hardware/metrics reporting, scheduling, shell jobs, array jobs, retries,
-> timeouts, live logs, cgroup limits, the installer, LAN discovery and the
-> web UI. Coming next: file transfer, Docker/GPU tasks, ephemeral node
+> timeouts, live logs, cgroup limits, the installer, LAN discovery, the
+> web UI and file transfer. Coming next: Docker/GPU tasks, ephemeral node
 > cleanup, release binaries.
 
 ## Quick start
@@ -87,6 +87,42 @@ own GPUs.
 
 To use the CLI from another computer:
 `cluster login --controller CONTROLLER_IP:8443` (asks for the admin password).
+
+## Files: inputs, outputs and scripts
+
+Remote machines don't share your disk, so jobs carry their files with them:
+
+```sh
+# Inputs: files or folders from this computer, placed in every task's working directory
+cluster submit --input scene.blend --input textures/ --output 'frames/*' --array 1-250:10 -- \
+  'blender -b scene.blend -o //frames/f_#### -s {i} -e $(( {i} + 9 )) -a'
+
+# A script is uploaded and run; arguments after -- are passed to it
+cluster submit --script train.py --input data/ --output 'model/**' --gpus 1 -- --epochs 10
+
+# Collect the outputs (array jobs get one folder per task index)
+cluster outputs <job>              # into ./<job>/
+cluster outputs <job> --list
+```
+
+- `--input SRC[:DEST]` places a file or folder at `DEST` (default: its name).
+  Each file is uploaded once (identical files are stored once), verified by
+  SHA-256, and cached on every node that downloads it, so running the same
+  job again downloads nothing. Inputs are read-only in the task; copy them if
+  the task must modify them.
+- `--output GLOB` collects matching files after each task (`*` within a
+  folder, `**` across folders; a folder name collects everything in it).
+  Outputs of the attempt that completed the task are kept, for finished and
+  timed-out tasks.
+- All transfers resume after interruptions. Progress shows in the CLI and on
+  the task page.
+- **Shared storage**: if nodes mount the same storage (NFS, a NAS), start
+  their workers with `--shared-storage /mnt/shared` (or set
+  `CLUSTER_SHARED_STORAGE` in `/etc/cluster/worker.env`) and use
+  `--shared-input datasets/big:data` to link a path from it without any
+  transfer. Such jobs only run on nodes with shared storage.
+- Workers keep at most 20 GiB of cached inputs by default
+  (`--cache-max 100G` to change).
 
 ## Web UI
 

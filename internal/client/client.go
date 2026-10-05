@@ -134,6 +134,43 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("controller: %s (HTTP %d)", e.Message, e.Status)
 }
 
+// Stream performs a request with an arbitrary body and no overall timeout
+// (for large uploads and downloads) and returns the response unread. The
+// caller must close its body. Non-2xx responses are returned as errors
+// only if failOnError is set.
+func (c *Client) Stream(ctx context.Context, method, path string, body io.Reader, size int64, header http.Header, failOnError bool) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.cfg.Controller+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.ContentLength = size
+		req.Header.Set("Content-Type", "application/octet-stream")
+	}
+	for k, v := range header {
+		req.Header[k] = v
+	}
+	if c.cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if failOnError && resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&e)
+		if e.Error == "" {
+			e.Error = resp.Status
+		}
+		return nil, &APIError{Status: resp.StatusCode, Message: e.Error}
+	}
+	return resp, nil
+}
+
 // Raw performs a request and returns the raw body and headers (used for
 // log streaming).
 func (c *Client) Raw(ctx context.Context, method, path string) ([]byte, http.Header, error) {

@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/NTFespolion307/QuorvexFusion/internal/blobstore"
 	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
 	"github.com/NTFespolion307/QuorvexFusion/internal/discovery"
 	"github.com/NTFespolion307/QuorvexFusion/internal/pki"
@@ -36,10 +37,14 @@ type Controller struct {
 	events *events
 	tm     *taskManager
 
-	joinMu           sync.Mutex
-	stopAdvertising  func()
-	history          poolHistory
-	lastMetricsEvent atomic.Int64 // unix ms of the last "metrics" UI event
+	joinMu          sync.Mutex
+	stopAdvertising func()
+	history         poolHistory
+	blobs           *blobstore.Store
+	downloads       atomic.Int64 // completed input downloads by workers
+
+	throttleMu sync.Mutex
+	lastEvent  map[string]time.Time // last UI event per topic (see publishThrottled)
 }
 
 // New loads the CA and opens the database of an initialised data dir.
@@ -52,9 +57,14 @@ func New(cfg *Config, log *slog.Logger) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	blobs, err := blobstore.Open(cfg.path("blobs"))
+	if err != nil {
+		st.Close()
+		return nil, err
+	}
 	c := &Controller{
 		cfg: cfg, log: log, store: st, ca: ca, hub: NewHub(), events: newEvents(),
-		tm: newTaskManager(cfg.path("logs")),
+		tm: newTaskManager(cfg.path("logs")), blobs: blobs, lastEvent: map[string]time.Time{},
 	}
 	if err := c.restoreReservations(); err != nil {
 		st.Close()
@@ -151,6 +161,7 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	go c.persistLastSeen(ctx)
 	go c.schedulerLoop(ctx)
 	go c.poolSampler(ctx)
+	go c.maintenanceLoop(ctx)
 
 	select {
 	case <-ctx.Done():

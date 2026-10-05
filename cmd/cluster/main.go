@@ -50,6 +50,7 @@ func main() {
 		submitCmd(),
 		jobsCmd(),
 		logsCmd(),
+		outputsCmd(),
 		cancelCmd(),
 		nodesCmd(),
 		tokenCmd(),

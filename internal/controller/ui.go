@@ -129,15 +129,19 @@ func (c *Controller) poolSampler(ctx context.Context) {
 	}
 }
 
-// publishMetrics tells UI subscribers that live numbers changed, at most
-// once every two seconds however many nodes report.
-func (c *Controller) publishMetrics() {
-	now := time.Now().UnixMilli()
-	last := c.lastMetricsEvent.Load()
-	if now-last < 2000 || !c.lastMetricsEvent.CompareAndSwap(last, now) {
+// publishThrottled notifies UI subscribers about a topic at most once
+// every two seconds, however often it changes (metrics arrive from every
+// node every few seconds; transfer progress even more often).
+func (c *Controller) publishThrottled(topic string) {
+	c.throttleMu.Lock()
+	now := time.Now()
+	if now.Sub(c.lastEvent[topic]) < 2*time.Second {
+		c.throttleMu.Unlock()
 		return
 	}
-	c.events.publish("metrics")
+	c.lastEvent[topic] = now
+	c.throttleMu.Unlock()
+	c.events.publish(topic)
 }
 
 // SetNodeDraining stops (or resumes) scheduling new tasks on a node.

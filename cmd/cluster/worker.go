@@ -26,6 +26,7 @@ const exitRevoked = 3
 type workerFlags struct {
 	dataDir, controller, token, code, fingerprint string
 	name, location, sharedStorage, taskUser       string
+	cacheMax                                      string
 	ephemeral, yes                                bool
 	labels                                        map[string]string
 }
@@ -43,6 +44,7 @@ func (wf *workerFlags) register(cmd *cobra.Command) {
 	f.StringVar(&wf.sharedStorage, "shared-storage", os.Getenv("CLUSTER_SHARED_STORAGE"), "path of storage shared with the controller (skips file transfers)")
 	f.BoolVar(&wf.ephemeral, "ephemeral", os.Getenv("CLUSTER_EPHEMERAL") == "1", "mark this node as ephemeral (cloud/rented)")
 	f.StringVar(&wf.taskUser, "task-user", os.Getenv("CLUSTER_TASK_USER"), "run tasks as this user (default: 'cluster' if it exists and the worker is root)")
+	f.StringVar(&wf.cacheMax, "cache-max", envOr("CLUSTER_CACHE_MAX", "20G"), "maximum size of the input file cache (e.g. 50G; 0 = unlimited)")
 	f.BoolVar(&wf.yes, "yes", false, "trust the controller's CA without a prompt if no --ca-fingerprint is given")
 	f.StringToStringVar(&wf.labels, "label", nil, "node label key=value (repeatable)")
 }
@@ -65,11 +67,16 @@ func (wf *workerFlags) options() worker.Options {
 		}
 		wf.labels = merged
 	}
+	cacheMax, err := parseBytes(wf.cacheMax)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning: --cache-max:", err, "(using 20G)")
+		cacheMax = 20 << 30
+	}
 	return worker.Options{
 		DataDir: wf.dataDir, Controller: wf.controller, Token: wf.token, CAFingerprint: wf.fingerprint,
 		ConfirmFingerprint: fingerprintConfirmer(wf.yes),
 		Name:               wf.name, Location: wf.location, Ephemeral: wf.ephemeral,
-		Labels: wf.labels, SharedStorage: wf.sharedStorage, TaskUser: wf.taskUser,
+		Labels: wf.labels, SharedStorage: wf.sharedStorage, TaskUser: wf.taskUser, CacheMaxBytes: int64(cacheMax),
 		Log: newLogger(),
 	}
 }

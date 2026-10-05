@@ -555,7 +555,7 @@ cmd_worker() {
   fi
 
   mkdir -p "$data" "$CONF_DIR"
-  chmod 700 "$data"
+  chmod 711 "$data" # tasks (another user) pass through to their working directories
   state_set worker_data "$data"
 
   if [ "$joined" = 0 ]; then

@@ -25,6 +25,49 @@ service NodeService {
   // Connect is the long-lived control stream of an approved node. The first
   // worker message must be a Hello. Any message counts as a heartbeat.
   rpc Connect(stream WorkerMessage) returns (stream ControllerMessage);
+
+  // File transfer runs over the same connection as separate streams, so
+  // big transfers never delay heartbeats on the control stream. Files are
+  // identified by their SHA-256 and every transfer can resume from an
+  // offset after a disconnect.
+
+  // Download streams a stored file (a task input) from offset onward. A
+  // node may only download inputs of tasks assigned to it.
+  rpc Download(DownloadRequest) returns (stream FileChunk);
+  // UploadStatus says how much of a file the controller already has.
+  rpc UploadStatus(UploadStatusRequest) returns (UploadStatusResponse);
+  // Upload sends a file (a task output); the first chunk names it.
+  rpc Upload(stream UploadChunk) returns (UploadResponse);
+}
+
+message DownloadRequest {
+  string sha256 = 1;
+  int64 offset = 2;
+}
+
+message FileChunk {
+  bytes data = 1;
+}
+
+message UploadStatusRequest {
+  string sha256 = 1;
+  int64 size = 2;
+}
+
+message UploadStatusResponse {
+  bool complete = 1;
+  int64 offset = 2;  // bytes already received; continue from here
+}
+
+message UploadChunk {
+  string sha256 = 1;  // set on the first chunk
+  int64 size = 2;     // total size, first chunk
+  int64 offset = 3;   // where data starts, first chunk
+  bytes data = 4;
+}
+
+message UploadResponse {
+  bool complete = 1;
 }
 
 message JoinRequest {
@@ -55,6 +98,7 @@ message WorkerMessage {
     TaskStarted task_started = 4;
     LogChunk log = 5;
     TaskResult result = 6;
+    TaskProgress progress = 7;
   }
 }
 
@@ -110,6 +154,34 @@ message TaskSpec {
   uint64 memory_bytes = 4;  // 0 = no limit
   repeated GPUAssignment gpus = 5;
   int64 timeout_seconds = 6;  // 0 = no timeout
+  repeated InputFile inputs = 7;
+  repeated string outputs = 8;  // globs relative to the working directory
+}
+
+// InputFile is placed at path (relative to the task's working directory)
+// before the task starts: downloaded by sha256, or, with shared_path,
+// linked from the node's shared storage.
+message InputFile {
+  string path = 1;
+  string sha256 = 2;
+  int64 size = 3;
+  uint32 mode = 4;
+  string shared_path = 5;  // relative to the node's shared storage root
+}
+
+message OutputFile {
+  string path = 1;
+  string sha256 = 2;
+  int64 size = 3;
+  uint32 mode = 4;
+}
+
+// TaskProgress reports input download or output upload progress.
+message TaskProgress {
+  string attempt_id = 1;
+  string phase = 2;  // "download" or "upload"
+  int64 done_bytes = 3;
+  int64 total_bytes = 4;
 }
 
 message AssignTask {
@@ -164,6 +236,7 @@ message TaskResult {
   string error = 4;
   int64 started_unix_ms = 5;
   int64 finished_unix_ms = 6;
+  repeated OutputFile outputs = 7;  // already uploaded when the result is sent
 }
 
 // Ping/Pong let the controller measure round-trip latency to each node.

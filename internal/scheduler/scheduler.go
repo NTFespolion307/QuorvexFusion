@@ -41,12 +41,13 @@ type Node struct {
 	UsedMemory uint64
 	UsedGPUs   map[int]bool // by GPU index
 
-	Labels       map[string]string
-	Docker       bool
-	NvidiaDocker bool
-	Ephemeral    bool
-	Remote       bool
-	Draining     bool
+	Labels        map[string]string
+	Docker        bool
+	NvidiaDocker  bool
+	Ephemeral     bool
+	Remote        bool
+	Draining      bool
+	SharedStorage bool // has the shared storage mount
 }
 
 // Task is the resource request of one queued task.
@@ -61,6 +62,7 @@ type Task struct {
 
 	NeedsDocker bool
 	NeedsNvidia bool // GPU containers
+	NeedsShared bool // inputs come from shared storage
 
 	AllowEphemeral bool
 	AllowRemote    bool
@@ -111,6 +113,8 @@ func eligible(n *Node, t *Task) string {
 		return "no Docker"
 	case t.NeedsNvidia && !n.NvidiaDocker:
 		return "no NVIDIA container toolkit"
+	case t.NeedsShared && !n.SharedStorage:
+		return "no shared storage"
 	case n.Ephemeral && !t.AllowEphemeral:
 		return "job does not allow ephemeral nodes"
 	case n.Remote && !t.AllowRemote:

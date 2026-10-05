@@ -47,11 +47,13 @@ type reservation struct {
 }
 
 type taskManager struct {
-	mu           sync.Mutex              // guards everything below and all task state transitions
-	reservations map[string]*reservation // by attempt ID
-	specs        map[string]*JobSpec     // job spec cache, by job ID
-	offline      map[string]*time.Timer  // disconnected nodes in their grace period
-	pending      map[string]string       // task ID -> why it isn't placed yet
+	mu           sync.Mutex                  // guards everything below and all task state transitions
+	reservations map[string]*reservation     // by attempt ID
+	specs        map[string]*JobSpec         // job spec cache, by job ID
+	offline      map[string]*time.Timer      // disconnected nodes in their grace period
+	pending      map[string]string           // task ID -> why it isn't placed yet
+	progress     map[string]*pb.TaskProgress // attempt ID -> latest transfer progress
+	cached       map[string]map[string]bool  // node ID -> files it has downloaded (for locality)
 
 	kick chan struct{}
 	logs *logStore
@@ -63,6 +65,8 @@ func newTaskManager(logDir string) *taskManager {
 		specs:        map[string]*JobSpec{},
 		offline:      map[string]*time.Timer{},
 		pending:      map[string]string{},
+		progress:     map[string]*pb.TaskProgress{},
+		cached:       map[string]map[string]bool{},
 		kick:         make(chan struct{}, 1),
 		logs:         newLogStore(logDir),
 	}
@@ -164,7 +168,7 @@ func (c *Controller) nodeSnapshotLocked() (map[string]*scheduler.Node, error) {
 		sn := &scheduler.Node{
 			ID: n.ID, CPUs: hw.CpuLimit, MemoryBytes: hw.MemoryBytes,
 			Labels: n.EffectiveLabels(), Docker: hw.Docker, NvidiaDocker: hw.NvidiaDocker,
-			Ephemeral: n.Ephemeral, Draining: n.Draining,
+			Ephemeral: n.Ephemeral, Draining: n.Draining, SharedStorage: n.SharedStorage != "",
 		}
 		for _, g := range hw.Gpus {
 			sn.GPUs = append(sn.GPUs, scheduler.GPU{Index: int(g.Index), UUID: g.Uuid, Vendor: g.Vendor})
@@ -179,11 +183,12 @@ func (c *Controller) nodeSnapshotLocked() (map[string]*scheduler.Node, error) {
 	return out, nil
 }
 
-func taskRequest(t *store.Task, spec *JobSpec) *scheduler.Task {
+func taskRequest(t *store.Task, spec *JobSpec, preferNodes map[string]bool) *scheduler.Task {
 	return &scheduler.Task{
 		ID: t.ID, CPUs: spec.CPUs, MemoryBytes: spec.MemoryBytes, GPUs: spec.GPUs,
 		Requires: spec.Requires, Prefers: spec.Prefers,
 		AllowEphemeral: spec.allowEphemeral(), AllowRemote: spec.allowRemote(),
+		NeedsShared: spec.needsShared(), PreferNodes: preferNodes,
 	}
 }
 
@@ -210,6 +215,7 @@ func (c *Controller) schedulePass() error {
 	}
 
 	byID := map[string]*store.Task{}
+	preferred := map[string]map[string]bool{} // per job, computed once per pass
 	reqs := make([]*scheduler.Task, 0, len(queued))
 	for _, t := range queued {
 		spec, err := c.jobSpecLocked(t.JobID)
@@ -218,7 +224,12 @@ func (c *Controller) schedulePass() error {
 			continue
 		}
 		byID[t.ID] = t
-		reqs = append(reqs, taskRequest(t, spec))
+		prefer, ok := preferred[t.JobID]
+		if !ok {
+			prefer = c.preferredNodesLocked(spec)
+			preferred[t.JobID] = prefer
+		}
+		reqs = append(reqs, taskRequest(t, spec, prefer))
 	}
 
 	placed := map[string]bool{}
@@ -268,6 +279,12 @@ func (c *Controller) startAttemptLocked(t *store.Task, p scheduler.Placement) {
 	ts := &pb.TaskSpec{
 		Command: substitute(spec.Command, t.Index), Env: env,
 		Cpus: spec.CPUs, MemoryBytes: spec.MemoryBytes, TimeoutSeconds: spec.TimeoutSec,
+		Outputs: spec.Outputs,
+	}
+	for _, in := range spec.Inputs {
+		ts.Inputs = append(ts.Inputs, &pb.InputFile{
+			Path: in.Path, Sha256: in.SHA256, Size: in.Size, Mode: in.Mode, SharedPath: in.Shared,
+		})
 	}
 	for _, g := range p.GPUs {
 		ts.Gpus = append(ts.Gpus, &pb.GPUAssignment{Index: int32(g.Index), Uuid: g.UUID, Vendor: g.Vendor})
@@ -381,11 +398,20 @@ func (c *Controller) finishAttemptLocked(r *reservation, res *pb.TaskResult) {
 		}
 	}
 
+	if len(res.Outputs) > 0 {
+		var missing int
+		o.Outputs, missing = c.acceptOutputs(res)
+		if missing > 0 {
+			c.log.Warn("worker reported outputs that never arrived", "task", r.taskID, "missing", missing)
+		}
+	}
+
 	if err := c.store.FinishAttempt(r.attemptID, o); err != nil && !errors.Is(err, store.ErrConflict) {
 		c.log.Error("finish attempt", "attempt", r.attemptID, "err", err)
 		return
 	}
 	delete(c.tm.reservations, r.attemptID)
+	delete(c.tm.progress, r.attemptID)
 	c.log.Info("attempt finished", "task", r.taskID, "attempt", r.number, "node", r.nodeID,
 		"result", o.State, "task_state", o.TaskState, "error", o.Error)
 	c.events.publish("jobs")
@@ -494,6 +520,9 @@ func (c *Controller) SubmitJob(spec *JobSpec) (*store.Job, error) {
 	if err := spec.Normalize(); err != nil {
 		return nil, err
 	}
+	if err := c.checkInputsUploaded(spec); err != nil {
+		return nil, err
+	}
 	indices, err := ParseArray(spec.Array)
 	if err != nil {
 		return nil, err
@@ -592,6 +621,7 @@ func (c *Controller) DeleteJob(jobID string) error {
 	delete(c.tm.specs, jobID)
 	c.tm.mu.Unlock()
 	c.events.publish("jobs")
+	go c.collectGarbage() // free the job's inputs and outputs if nothing else uses them
 	return nil
 }
 
@@ -652,8 +682,30 @@ func (c *Controller) ListJobViews(limit int) ([]*JobView, error) {
 // TaskView is a task with its attempts and, if queued, why it waits.
 type TaskView struct {
 	*store.Task
-	PendingReason string           `json:"pending_reason,omitempty"`
-	AttemptList   []*store.Attempt `json:"attempt_list,omitempty"`
+	PendingReason string              `json:"pending_reason,omitempty"`
+	AttemptList   []*store.Attempt    `json:"attempt_list,omitempty"`
+	Progress      *TransferProgress   `json:"progress,omitempty"` // inputs downloading / outputs uploading
+	Outputs       []*store.OutputFile `json:"outputs,omitempty"`
+}
+
+// TransferProgress is a running task's current file transfer.
+type TransferProgress struct {
+	Phase      string `json:"phase"` // "download" (inputs) or "upload" (outputs)
+	DoneBytes  int64  `json:"done_bytes"`
+	TotalBytes int64  `json:"total_bytes"`
+}
+
+func (c *Controller) progressFor(t *store.Task) *TransferProgress {
+	if !t.State.Active() {
+		return nil
+	}
+	c.tm.mu.Lock()
+	defer c.tm.mu.Unlock()
+	p := c.tm.progress[t.AttemptID]
+	if p == nil || p.DoneBytes >= p.TotalBytes {
+		return nil
+	}
+	return &TransferProgress{Phase: p.Phase, DoneBytes: p.DoneBytes, TotalBytes: p.TotalBytes}
 }
 
 func (c *Controller) PendingReason(taskID string) string {
@@ -671,9 +723,12 @@ func (c *Controller) GetTaskView(id string) (*TaskView, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := &TaskView{Task: t, AttemptList: attempts}
+	v := &TaskView{Task: t, AttemptList: attempts, Progress: c.progressFor(t)}
 	if t.State == store.TaskQueued {
 		v.PendingReason = c.PendingReason(id)
+	}
+	if v.Outputs, err = c.store.TaskOutputs(id); err != nil {
+		return nil, err
 	}
 	return v, nil
 }
@@ -690,6 +745,10 @@ func (c *Controller) ListTaskViews(jobID string, state store.TaskState, limit, o
 		v := &TaskView{Task: t}
 		if t.State == store.TaskQueued {
 			v.PendingReason = c.tm.pending[t.ID]
+		}
+		// (c.tm.mu is held here, so read progress directly, not via progressFor.)
+		if p := c.tm.progress[t.AttemptID]; t.State.Active() && p != nil && p.DoneBytes < p.TotalBytes {
+			v.Progress = &TransferProgress{Phase: p.Phase, DoneBytes: p.DoneBytes, TotalBytes: p.TotalBytes}
 		}
 		out = append(out, v)
 	}

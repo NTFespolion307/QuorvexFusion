@@ -31,3 +31,5 @@ func exitStatus(err error, memLimited bool) (int32, string) {
 	}
 	return -1, err.Error()
 }
+
+func chownTo(path string, u *taskUser) error { return nil }

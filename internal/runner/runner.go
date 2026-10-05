@@ -18,12 +18,14 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,7 +52,14 @@ type Options struct {
 	// UseSystemd wraps tasks in `systemd-run --scope` for cgroup CPU and
 	// memory limits.
 	UseSystemd bool
-	Log        *slog.Logger
+	// CacheDir holds downloaded input files, shared by all tasks;
+	// CacheMaxBytes bounds its size (least recently used files go first).
+	CacheDir      string
+	CacheMaxBytes int64
+	// SharedStorage is this node's mount of storage shared between nodes;
+	// inputs given as shared paths are linked from there.
+	SharedStorage string
+	Log           *slog.Logger
 }
 
 type Runner struct {
@@ -58,9 +67,12 @@ type Runner struct {
 	log  *slog.Logger
 	user *taskUser
 
+	cache *cache
+
 	mu           sync.Mutex
-	send         Sender // nil while disconnected
-	gen          int    // bumped on every (re)connect
+	send         Sender               // nil while disconnected
+	client       pb.NodeServiceClient // for file transfers; nil while disconnected
+	gen          int                  // bumped on every (re)connect
 	attempts     map[string]*attempt
 	shuttingDown bool
 }
@@ -71,7 +83,10 @@ type attempt struct {
 	dir    string
 	assign *pb.AssignTask
 
-	cancel chan string   // receives a reason to stop the process
+	// stop is cancelled (with the reason as its cause) to stop the attempt,
+	// whether it is still downloading inputs or already running.
+	stop   context.Context
+	stopFn context.CancelCauseFunc
 	exited chan struct{} // closed once the process has ended (result set)
 
 	// Guarded by Runner.mu:
@@ -85,14 +100,24 @@ type attempt struct {
 // worker: finished ones are re-reported, interrupted ones are killed and
 // reported as lost.
 func New(opts Options) (*Runner, error) {
-	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
+	// 0711: tasks running as another user must be able to pass through to
+	// their own working directory, but not list other tasks' directories.
+	if err := os.MkdirAll(opts.Dir, 0o711); err != nil {
 		return nil, err
 	}
+	_ = os.Chmod(opts.Dir, 0o711)
 	u, err := lookupTaskUser(opts.TaskUser)
 	if err != nil {
 		return nil, err
 	}
-	r := &Runner{opts: opts, log: opts.Log, user: u, attempts: map[string]*attempt{}}
+	if opts.CacheDir == "" {
+		opts.CacheDir = filepath.Join(opts.Dir, "..", "cache")
+	}
+	c, err := newCache(opts.CacheDir, opts.CacheMaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	r := &Runner{opts: opts, log: opts.Log, user: u, cache: c, attempts: map[string]*attempt{}}
 	if err := r.recover(); err != nil {
 		return nil, err
 	}
@@ -104,10 +129,11 @@ func New(opts Options) (*Runner, error) {
 // Connected installs the sender for a new connection. offsets are the
 // controller's log positions for attempts it adopted; shipping resumes
 // from there (or from zero for attempts it did not mention).
-func (r *Runner) Connected(send Sender, offsets map[string]*pb.LogOffsets) {
+func (r *Runner) Connected(send Sender, client pb.NodeServiceClient, offsets map[string]*pb.LogOffsets) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.send = send
+	r.client = client
 	r.gen++
 	for id, a := range r.attempts {
 		off := offsets[id]
@@ -121,7 +147,32 @@ func (r *Runner) Connected(send Sender, offsets map[string]*pb.LogOffsets) {
 func (r *Runner) Disconnected() {
 	r.mu.Lock()
 	r.send = nil
+	r.client = nil
 	r.mu.Unlock()
+}
+
+// connection returns the current transfer client and connection
+// generation, waiting while disconnected.
+func (r *Runner) connection(ctx context.Context) (pb.NodeServiceClient, int, error) {
+	for {
+		r.mu.Lock()
+		client, gen := r.client, r.gen
+		r.mu.Unlock()
+		if client != nil {
+			return client, gen, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, 0, context.Cause(ctx)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+func (r *Runner) currentGen() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gen
 }
 
 // Held lists every attempt this worker still holds, for the Hello message.
@@ -158,9 +209,9 @@ func (r *Runner) Start(as *pb.AssignTask) {
 	}
 	a := &attempt{
 		id: as.AttemptId, dir: filepath.Join(r.opts.Dir, as.AttemptId), assign: as,
-		cancel: make(chan string, 1), exited: make(chan struct{}),
-		resetTo: &pb.LogOffsets{},
+		exited: make(chan struct{}), resetTo: &pb.LogOffsets{},
 	}
+	a.stop, a.stopFn = context.WithCancelCause(context.Background())
 	r.attempts[a.id] = a
 	r.mu.Unlock()
 
@@ -177,10 +228,7 @@ func (r *Runner) Cancel(id, reason string) {
 	if a == nil {
 		return
 	}
-	select {
-	case a.cancel <- reason:
-	default: // already being canceled
-	}
+	a.stopFn(errors.New(reason)) // no-op if already stopped
 }
 
 // Ack means the controller has the result: the attempt can be forgotten.
@@ -203,10 +251,7 @@ func (r *Runner) Shutdown() {
 	}
 	r.mu.Unlock()
 	for _, a := range running {
-		select {
-		case a.cancel <- "worker shutting down":
-		default:
-		}
+		a.stopFn(errors.New("worker shutting down"))
 	}
 	deadline := time.After(killGrace + 5*time.Second)
 	for _, a := range running {
@@ -245,6 +290,21 @@ func (r *Runner) runProcess(a *attempt) *pb.TaskResult {
 	if b, err := protojson.Marshal(a.assign); err == nil {
 		_ = os.WriteFile(filepath.Join(a.dir, "assign.json"), b, 0o600)
 	}
+	if r.user != nil {
+		if err := chownTo(work, r.user); err != nil {
+			return failedToStart(err)
+		}
+	}
+
+	// Inputs first: downloading can take a while, and the task can be
+	// cancelled meanwhile.
+	if err := r.stageInputs(a, work); err != nil {
+		if a.stop.Err() != nil {
+			return r.stoppedResult(a, 0)
+		}
+		return failedToStart(fmt.Errorf("preparing inputs: %w", err))
+	}
+
 	stdout, err := os.Create(filepath.Join(a.dir, "stdout"))
 	if err != nil {
 		return failedToStart(err)
@@ -283,15 +343,9 @@ func (r *Runner) runProcess(a *attempt) *pb.TaskResult {
 	case waitErr = <-waitc:
 	case <-timeout:
 		stopReason, outcome = fmt.Sprintf("timed out after %ds", a.assign.Spec.TimeoutSeconds), pb.TaskResult_TIMED_OUT
-	case reason := <-a.cancel:
-		stopReason, outcome = reason, pb.TaskResult_CANCELED
-		r.mu.Lock()
-		if r.shuttingDown {
-			// Not the task's fault: report it lost so it is requeued
-			// without using up a retry.
-			outcome = pb.TaskResult_LOST
-		}
-		r.mu.Unlock()
+	case <-a.stop.Done():
+		res := r.stoppedResult(a, started)
+		stopReason, outcome = res.Error, res.Outcome
 	}
 	if stopReason != "" {
 		r.log.Info("stopping task", "attempt", a.id, "reason", stopReason)
@@ -309,10 +363,33 @@ func (r *Runner) runProcess(a *attempt) *pb.TaskResult {
 	res := &pb.TaskResult{StartedUnixMs: started}
 	if stopReason != "" {
 		res.Outcome, res.Error = outcome, stopReason
-		return res
+	} else {
+		res.Outcome = pb.TaskResult_EXITED
+		res.ExitCode, res.Error = exitStatus(waitErr, a.assign.Spec.MemoryBytes > 0)
 	}
-	res.Outcome = pb.TaskResult_EXITED
-	res.ExitCode, res.Error = exitStatus(waitErr, a.assign.Spec.MemoryBytes > 0)
+	// Outputs of finished and timed-out tasks are kept (a timed-out task's
+	// partial results are often useful); cancelled or lost ones are not.
+	if res.Outcome == pb.TaskResult_EXITED || res.Outcome == pb.TaskResult_TIMED_OUT {
+		if err := r.collectOutputs(a, work, res); err != nil {
+			res.Error = strings.TrimPrefix(res.Error+"; collecting outputs: "+err.Error(), "; ")
+		}
+	}
+	return res
+}
+
+// stoppedResult describes an attempt stopped through a.stop: cancelled by
+// the user, or lost because the worker is shutting down (not the task's
+// fault, so it is requeued without using up a retry).
+func (r *Runner) stoppedResult(a *attempt, started int64) *pb.TaskResult {
+	res := &pb.TaskResult{Outcome: pb.TaskResult_CANCELED, StartedUnixMs: started, ExitCode: -1}
+	if cause := context.Cause(a.stop); cause != nil {
+		res.Error = cause.Error()
+	}
+	r.mu.Lock()
+	if r.shuttingDown {
+		res.Outcome = pb.TaskResult_LOST
+	}
+	r.mu.Unlock()
 	return res
 }
 
@@ -327,8 +404,8 @@ func failedToStart(err error) *pb.TaskResult {
 func (r *Runner) ship(a *attempt) {
 	var offsets [2]int64 // stdout, stderr: bytes the controller has (as far as we know)
 	gen := -1
-	startedSent, resultSent := false, false
-	files := [2]string{filepath.Join(a.dir, "stdout"), filepath.Join(a.dir, "stderr")}
+	startedSent, resultSent, uploaded := false, false, false
+	logFiles := [2]string{filepath.Join(a.dir, "stdout"), filepath.Join(a.dir, "stderr")}
 	streams := [2]pb.Stream{pb.Stream_STDOUT, pb.Stream_STDERR}
 
 	caughtUp := true
@@ -345,7 +422,9 @@ func (r *Runner) ship(a *attempt) {
 			offsets = [2]int64{a.resetTo.Stdout, a.resetTo.Stderr}
 			a.resetTo = nil
 			gen = curGen
-			startedSent, resultSent = false, false
+			// Re-check outputs on a new connection too: if we were away for
+			// long, the controller may have cleaned up an unclaimed upload.
+			startedSent, resultSent, uploaded = false, false, false
 		}
 		r.mu.Unlock()
 
@@ -364,14 +443,24 @@ func (r *Runner) ship(a *attempt) {
 
 		// Ship whatever was written since last time.
 		caughtUp = true
-		for i := range files {
-			n, done := r.shipFile(gen, a.id, files[i], streams[i], offsets[i])
+		for i := range logFiles {
+			n, done := r.shipFile(gen, a.id, logFiles[i], streams[i], offsets[i])
 			offsets[i] += n
 			caughtUp = caughtUp && done
 		}
 
 		// The result goes last, after all output, on the same ordered
 		// stream, so the controller has the full log when it sees it.
+		// Output files are uploaded before the result, so the controller
+		// has them when it accepts the result.
+		if result != nil && caughtUp && !resultSent && !uploaded {
+			if err := r.uploadOutputs(a, result, gen); err != nil {
+				r.log.Warn("uploading outputs failed; will retry", "attempt", a.id, "err", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			uploaded = true
+		}
 		if result != nil && caughtUp && !resultSent {
 			resultSent = r.sendMsg(gen, &pb.WorkerMessage{Msg: &pb.WorkerMessage_Result{Result: result}})
 		}
@@ -469,8 +558,9 @@ func (r *Runner) recover() error {
 		if b, err := os.ReadFile(filepath.Join(dir, "assign.json")); err == nil {
 			_ = protojson.Unmarshal(b, assign)
 		}
-		a := &attempt{id: id, dir: dir, assign: assign, cancel: make(chan string, 1),
+		a := &attempt{id: id, dir: dir, assign: assign,
 			exited: make(chan struct{}), result: res, started: res.StartedUnixMs, resetTo: &pb.LogOffsets{}}
+		a.stop, a.stopFn = context.WithCancelCause(context.Background())
 		close(a.exited)
 		r.attempts[id] = a
 		go r.ship(a)

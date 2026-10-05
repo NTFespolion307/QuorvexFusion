@@ -72,7 +72,7 @@ func newRunner(t *testing.T, dir string) (*Runner, *fakeController) {
 		t.Fatal(err)
 	}
 	f := newFake()
-	r.Connected(f.send, nil)
+	r.Connected(f.send, nil, nil)
 	return r, f
 }
 
@@ -159,7 +159,7 @@ func TestBuffersWhileDisconnected(t *testing.T) {
 	}
 	// Reconnect: the controller has none of the log yet.
 	f2 := newFake()
-	r.Connected(f2.send, map[string]*pb.LogOffsets{})
+	r.Connected(f2.send, nil, map[string]*pb.LogOffsets{})
 	res := waitResult(t, f2, "a4", 5*time.Second)
 	if res.Outcome != pb.TaskResult_EXITED || f2.log("a4", pb.Stream_STDOUT) != "hello\n" {
 		t.Fatalf("after reconnect: result=%v stdout=%q", res, f2.log("a4", pb.Stream_STDOUT))

@@ -291,7 +291,7 @@ func (ns *nodeServer) Connect(stream pb.NodeService_ConnectServer) error {
 			switch m := msg.Msg.(type) {
 			case *pb.WorkerMessage_Metrics:
 				sess.recordMetrics(m.Metrics)
-				c.publishMetrics()
+				c.publishThrottled("metrics")
 			case *pb.WorkerMessage_Pong:
 				sess.recordPong(m.Pong)
 			case *pb.WorkerMessage_TaskStarted:
@@ -300,6 +300,8 @@ func (ns *nodeServer) Connect(stream pb.NodeService_ConnectServer) error {
 				c.handleLog(nodeID, m.Log)
 			case *pb.WorkerMessage_Result:
 				c.handleResult(sess, m.Result)
+			case *pb.WorkerMessage_Progress:
+				c.handleProgress(nodeID, m.Progress)
 			}
 		}
 	}()

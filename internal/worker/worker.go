@@ -45,6 +45,9 @@ type Options struct {
 	// worker is root and that user exists, else the worker's own user).
 	TaskUser string
 
+	// CacheMaxBytes limits the input file cache (0 = unlimited).
+	CacheMaxBytes int64
+
 	Name          string // overrides the reported hostname
 	Location      string
 	Ephemeral     bool
@@ -200,6 +203,7 @@ func (w *Worker) startRunner() error {
 	}
 	r, err := runner.New(runner.Options{
 		Dir: w.id.path("tasks"), TaskUser: taskUser, UseSystemd: useSystemd, Log: w.log,
+		CacheDir: w.id.path("cache"), CacheMaxBytes: w.opts.CacheMaxBytes, SharedStorage: w.opts.SharedStorage,
 	})
 	if err != nil {
 		return err
@@ -269,7 +273,7 @@ func (w *Worker) session(ctx context.Context, client pb.NodeServiceClient) (welc
 		}
 	}
 	// The runner resends logs and results from where the controller is.
-	w.runner.Connected(send, welcome.LogOffsets)
+	w.runner.Connected(send, client, welcome.LogOffsets)
 	defer w.runner.Disconnected()
 
 	// Metrics loop; doubles as the heartbeat.

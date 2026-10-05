@@ -73,6 +73,13 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("GET /api/v1/tasks/{id}", s.getTask)
 	authed.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.cancelTask)
 	authed.HandleFunc("GET /api/v1/tasks/{id}/logs", s.taskLogs)
+	authed.HandleFunc("GET /api/v1/tasks/{id}/outputs", s.taskOutputs)
+	authed.HandleFunc("GET /api/v1/tasks/{id}/files/{path...}", s.taskFile)
+	authed.HandleFunc("GET /api/v1/jobs/{id}/outputs", s.jobOutputs)
+	authed.HandleFunc("GET /api/v1/jobs/{id}/outputs.zip", s.jobOutputsZip)
+	authed.HandleFunc("HEAD /api/v1/blobs/{sha}", s.blobStatus)
+	authed.HandleFunc("PUT /api/v1/blobs/{sha}", s.blobPut)
+	authed.HandleFunc("POST /api/v1/blobs", s.blobPost)
 
 	authed.HandleFunc("GET /api/v1/join-tokens", s.listJoinTokens)
 	authed.HandleFunc("POST /api/v1/join-tokens", s.createJoinToken)
