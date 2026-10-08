@@ -375,7 +375,7 @@ func printNode(n *controller.NodeView) {
 	} else {
 		network += " (set by admin)"
 	}
-	row("Network", network)
+	row("Connection", network)
 	row("Address", n.Addr)
 	if n.Status == "online" {
 		row("Latency", fmt.Sprintf("%.1f ms", n.RTTMillis))
