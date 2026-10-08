@@ -83,7 +83,12 @@ need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     command -v sudo >/dev/null || die "please run as root"
     info "Root is needed to install services; re-running with sudo"
-    exec sudo -E bash "$0" "$@"
+    # Not "sudo -E": many systems (e.g. some cloud images) forbid keeping the
+    # environment. The only variable we need is passed explicitly.
+    if [ -n "${CLUSTER_ADMIN_PASSWORD:-}" ]; then
+      exec sudo env CLUSTER_ADMIN_PASSWORD="$CLUSTER_ADMIN_PASSWORD" bash "$0" "$@"
+    fi
+    exec sudo bash "$0" "$@"
   fi
 }
 
