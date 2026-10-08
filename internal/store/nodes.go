@@ -33,6 +33,7 @@ type Node struct {
 	Addr          string
 	SharedStorage string
 	Draining      bool
+	Network       string // "" = detect from the connection address, "local" or "remote"
 	CreatedAt     time.Time
 	ApprovedAt    *time.Time
 	LastSeen      *time.Time
@@ -61,7 +62,7 @@ func (n *Node) EffectiveLabels() map[string]string {
 }
 
 const nodeCols = `id, name, status, pubkey_fp, csr, cert_serial, token_id, location, ephemeral,
-	worker_labels, labels, hardware, addr, shared_storage, draining, created_at, approved_at, last_seen`
+	worker_labels, labels, hardware, addr, shared_storage, draining, created_at, approved_at, last_seen, network`
 
 func scanNode(row interface{ Scan(...any) error }) (*Node, error) {
 	var n Node
@@ -69,7 +70,7 @@ func scanNode(row interface{ Scan(...any) error }) (*Node, error) {
 	var created int64
 	var approved, seen sql.NullInt64
 	err := row.Scan(&n.ID, &n.Name, &n.Status, &n.PubKeyFP, &n.CSR, &n.CertSerial, &n.TokenID, &n.Location,
-		&n.Ephemeral, &wl, &l, &n.Hardware, &n.Addr, &n.SharedStorage, &n.Draining, &created, &approved, &seen)
+		&n.Ephemeral, &wl, &l, &n.Hardware, &n.Addr, &n.SharedStorage, &n.Draining, &created, &approved, &seen, &n.Network)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -173,6 +174,19 @@ func (s *Store) SetNodeDraining(id string, draining bool) error {
 
 func (s *Store) SetNodeLabels(id string, labels map[string]string) error {
 	res, err := s.db.Exec(`UPDATE nodes SET labels = ? WHERE id = ?`, encodeLabels(labels), id)
+	return expectRow(res, err)
+}
+
+// NodeSettings are the per-node settings an admin can change.
+type NodeSettings struct {
+	Location  string `json:"location"`
+	Ephemeral bool   `json:"ephemeral"`
+	Network   string `json:"network"` // "", "local" or "remote"
+}
+
+func (s *Store) SetNodeSettings(id string, ns NodeSettings) error {
+	res, err := s.db.Exec(`UPDATE nodes SET location = ?, ephemeral = ?, network = ? WHERE id = ?`,
+		ns.Location, boolInt(ns.Ephemeral), ns.Network, id)
 	return expectRow(res, err)
 }
 

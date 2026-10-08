@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/NTFespolion307/QuorvexFusion/internal/controller"
+	"github.com/NTFespolion307/QuorvexFusion/internal/store"
 	"github.com/NTFespolion307/QuorvexFusion/internal/version"
 )
 
@@ -164,6 +165,24 @@ func (s *Server) setNodeLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.c.SetNodeLabels(id, labels); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) setNodeSettings(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.nodeID(w, r)
+	if !ok {
+		return
+	}
+	var ns store.NodeSettings
+	if err := readJSON(r, &ns); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ns.Location = strings.TrimSpace(ns.Location)
+	if err := s.c.SetNodeSettings(id, ns); err != nil {
 		writeErr(w, err)
 		return
 	}

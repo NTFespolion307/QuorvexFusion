@@ -13,8 +13,8 @@ pool are scheduled onto them automatically.
 > **Status:** under active development. Working today: joining nodes,
 > hardware/metrics reporting, scheduling, shell jobs, array jobs, retries,
 > timeouts, live logs, cgroup limits, the installer, LAN discovery, the
-> web UI and file transfer. Coming next: Docker/GPU tasks, ephemeral node
-> cleanup, release binaries.
+> web UI, file transfer, remote and ephemeral nodes, Let's Encrypt. Coming
+> next: Docker/GPU containers, release binaries.
 
 ## Quick start
 
@@ -151,41 +151,160 @@ trust store.
 | Worker logs | `journalctl -u cluster-worker -f` |
 | Worker settings (location, labels) | edit `/etc/cluster/worker.env`, then `sudo systemctl restart cluster-worker` |
 | Change admin password | `sudo -u clusterctl cluster controller passwd --data-dir /var/lib/cluster` |
+| Change address, domain, ephemeral timeout | `sudo cluster controller set --help` |
+| Change a node's location, labels, local/remote | web UI *Edit*, or `cluster nodes set NODE --help` |
 | See what a worker detects | `cluster worker probe` |
 
 All installer options: `./install.sh controller --help`, `./install.sh worker --help`.
 
-## Workers without systemd
+## Joining machines from anywhere
 
-Inside containers (or anywhere without systemd), run the worker in the
-foreground under any process supervisor:
+Workers only make outgoing connections, so worker machines never need port
+forwarding, a public IP or open ports. Only the controller must be
+reachable (see [Networking](#networking)).
+
+### A machine on your LAN
 
 ```sh
-cluster worker --controller CONTROLLER_IP --code 7KQ2-MX4P-9TRA-BH3W-C8NE \
-  --data-dir /var/lib/cluster-worker --location vastai --ephemeral
+git clone https://github.com/NTFespolion307/QuorvexFusion.git && cd QuorvexFusion
+sudo ./install.sh worker          # finds the controller, asks for the join code
+```
+
+### A rented GPU box (vast.ai and similar)
+
+Rented instances are containers without systemd, and they come and go, so
+mark them **ephemeral**: when one stays offline longer than the ephemeral
+timeout (1 hour by default) it is removed from the cluster automatically,
+and its tasks are requeued as soon as it disappears.
+
+Create a code for them on the controller (or in the web UI, *Join tokens*):
+
+```sh
+cluster token create --location vastai --ephemeral --expires 720h --description "vast.ai"
+```
+
+Then use the printed one-liner as the instance's **on-start script**:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NTFespolion307/QuorvexFusion/main/bootstrap.sh \
+  | sh -s -- --controller controller1.example.com --code 7KQ2-MX4P-9TRA-BH3W-C8NE
+```
+
+It installs the `cluster` binary, joins with the code and keeps the worker
+running in the background (log: `/var/log/cluster-worker.log`); restarting
+the instance reuses the same identity. GPUs are detected with `nvidia-smi`,
+so pick an image with the software your jobs need (CUDA, PyTorch,
+Blender, ...) and submit with `--gpus 1`. Notes:
+
+- Inside such containers Docker is usually unavailable, so run tasks as
+  plain commands (they are, by default).
+- CPU and memory limits are not enforced without systemd; the scheduler
+  still never places more work than the machine's capacity.
+- A `--require location=vastai` or `--no-ephemeral` / `--no-remote` on a
+  job controls whether it may use rented machines.
+
+### A cloud VM
+
+On a VM with systemd, the same one-liner installs a proper `cluster-worker`
+service (it needs root, e.g. in cloud-init's `runcmd`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NTFespolion307/QuorvexFusion/main/bootstrap.sh \
+  | sudo sh -s -- --controller controller1.example.com --code ... --location gcp-us-central1
+```
+
+Add `--ephemeral` for preemptible/spot VMs.
+
+### Any other supervisor
+
+The worker is a single foreground process; run it under whatever manages
+your processes (Docker, supervisord, runit, a Kubernetes pod):
+
+```sh
+cluster worker --controller CONTROLLER --code 7KQ2-MX4P-9TRA-BH3W-C8NE \
+  --data-dir /var/lib/cluster-worker --location office
 ```
 
 The code is only needed for the first run; the node's identity is saved in
-`--data-dir`. Keep that directory on persistent storage if the container may
-restart. Without root and systemd, CPU/memory limits are not enforced.
+`--data-dir`. Keep that directory on persistent storage. Exit code 3 means
+the node was revoked: don't restart it then.
 
 ## Networking
 
-Workers connect to the controller's node port (**7443**). Browsers and the
-CLI use the web/API port (**8443**). Both use TLS with the controller's own
-certificate authority; workers verify it by fingerprint, so they also work
-when reaching the controller by IP, LAN name or VPN name.
+Two ports, both TLS with the cluster's own certificate authority:
 
-- **On a LAN:** nothing else to do. Open the ports if a firewall is active
-  (the installer prints the exact commands).
-- **Over a VPN (Tailscale, Headscale, WireGuard):** install the controller
-  with `--listen-ip <its VPN IP>` so it is only reachable over the VPN, and
-  give workers that IP or VPN name.
-- **Exposed to the internet:** forward/open 7443 (and 8443 if you want the
-  UI remotely) and pass `--public-addr your.domain` so join commands use it.
+| Port | Used by | Needs to be reachable from |
+|---|---|---|
+| **7443** | workers | every worker |
+| **8443** | web UI, CLI, API | wherever you browse/administer from |
 
-More detail on each setup (and Let's Encrypt for the UI) is coming with the
-remote-nodes milestone.
+Workers recognise the controller by its certificate, not by its name or
+address, so they work whether they reach it by IP, LAN name, domain or
+VPN name.
+
+### Setup 1: controller exposed to the internet (port forwarding)
+
+Use this when remote machines (rented GPUs, cloud VMs, friends' PCs) should
+join over the internet.
+
+1. Give the controller machine a fixed LAN address (DHCP reservation on the
+   router), e.g. `192.168.0.120`.
+2. On the router, forward TCP **7443** to `192.168.0.120:7443`. Forward
+   **8443** too if you want the web UI from outside.
+3. Optional but recommended: a domain name. Create a DNS `A` record such as
+   `controller1.example.com` pointing at your public IP (use a dynamic-DNS
+   service if that IP changes), then tell the controller:
+   ```sh
+   sudo cluster controller set --public-addr controller1.example.com
+   ```
+   Join commands and codes now use that name.
+4. Inside your LAN, the domain resolves to your public IP, which many
+   routers don't loop back ("NAT hairpinning"). Either add a local DNS
+   entry (router or Pi-hole) mapping the domain to `192.168.0.120`, or keep
+   using the LAN IP for local machines.
+
+**A real certificate for the web UI (Let's Encrypt).** Browsers warn about
+the cluster's own certificate. With a domain you can get a trusted one:
+
+```sh
+sudo cluster controller set --domain controller1.example.com --acme-email you@example.com
+```
+
+Let's Encrypt checks the domain on port **443**, so forward external port
+443 to the controller's UI port (8443), or make the UI listen on 443
+directly (`--http-listen :443`) and forward 443 to 443. If you'd rather use
+port 80 for the check, add `--acme-http-listen :80` and forward port 80. The
+certificate is renewed automatically. Access by IP keeps working (with the
+cluster's own certificate), and so does everything else if Let's Encrypt
+is ever unreachable.
+
+**What is exposed:** the worker port accepts only nodes holding a
+certificate the controller issued, plus join attempts, which need a valid
+code and are rate-limited. The web port serves only the login page without
+a session; logins are rate-limited. Use a strong admin password.
+
+### Setup 2: everything on a VPN (Tailscale, Headscale, WireGuard)
+
+Use this when you don't want anything exposed to the internet. Put the
+controller and all workers on the same overlay network, then make the
+controller listen only on its VPN address:
+
+```sh
+sudo ./install.sh controller --listen-ip 100.101.102.103   # the controller's Tailscale IP
+sudo ./install.sh worker --controller 100.101.102.103 --code ...   # or its Tailscale name
+```
+
+Nothing needs port forwarding, and the controller is invisible outside the
+VPN. LAN discovery (mDNS) doesn't cross VPNs, so give workers the address.
+
+### Local and remote nodes
+
+Each node is classified by the address it connects from: LAN, VPN
+(including Tailscale's 100.64.0.0/10) and loopback addresses are **local**;
+anything else is **remote**. The scheduler prefers local nodes when several
+fit, and a job submitted with `--no-remote` never leaves your network.
+Override the classification per node in the web UI (*Edit*) or with
+`cluster nodes set NODE --network local|remote|auto`.
 
 ## Development
 

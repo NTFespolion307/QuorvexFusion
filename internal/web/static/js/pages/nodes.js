@@ -53,6 +53,7 @@ export function nodeBadges(n) {
     stateBadge(n.status),
     n.draining ? html`<span class="badge warn">draining</span>` : "",
     n.ephemeral ? html`<span class="badge info">ephemeral</span>` : "",
+    n.remote ? html`<span class="badge accent" title="connects over the internet">remote</span>` : "",
     hw.in_container ? html`<span class="badge">container</span>` : "",
     n.hardware && !hw.docker ? html`<span class="badge">no docker</span>` : "",
     hw.nvidia_docker ? html`<span class="badge accent">gpu containers</span>` : "",
@@ -74,7 +75,7 @@ function card(n) {
     <div class="badges">${nodeBadges(n)}</div>
     <div class="sub">
       ${n.location ? html`<span>📍 ${n.location}</span>` : ""}
-      ${ip ? html`<span class="mono">${ip}</span>` : ""}
+      ${ip ? html`<span class="mono" title="address it connects from">${ip}</span>` : ""}
       ${m.uptime_seconds ? html`<span>up ${duration(m.uptime_seconds * 1000)}</span>` : ""}
       ${n.version ? html`<span class="faint">version ${n.version}</span>` : ""}
     </div>
@@ -104,7 +105,7 @@ export function actionButtons(n) {
   return [
     n.status === "pending" ? b("approve", "Approve", "primary") : "",
     n.status === "online" || n.status === "offline" ? b(n.draining ? "undrain" : "drain", n.draining ? "Resume" : "Drain") : "",
-    n.status !== "revoked" ? b("labels", "Labels") : "",
+    n.status !== "revoked" ? b("edit", "Edit") : "",
     n.status !== "revoked" ? b("revoke", n.status === "pending" ? "Reject" : "Revoke", "danger") : "",
     n.status !== "online" ? b("remove", "Remove", "ghost") : "",
   ];
@@ -130,17 +131,33 @@ export async function nodeAction(e, nodes, refresh) {
       case "undrain":
         await api.post(path + "/drain", { draining: false });
         break;
-      case "labels": {
-        const worker = Object.entries(n.labels || {}).filter(([k]) => !(k in (n.admin_labels || {})));
-        const form = await modal(`Labels of ${n.name}`, html`
-          <label class="field">Labels (KEY=VALUE, one per line or comma separated)
-            <textarea name="labels" rows="5">${kvText(n.admin_labels, "\n")}</textarea></label>
-          <p class="hint">Jobs can require or prefer labels (--require gpu=4090).
-          These override labels the worker reports itself${worker.length ? html`: ${worker.map(([k, v]) => html`<span class="chip">${k}=${v}</span> `)}` : ""}.</p>`,
-          { okText: "Save" });
+      case "edit": {
+        const builtIn = new Set(["location", "hostname"]);
+        const worker = Object.entries(n.labels || {}).filter(([k]) => !(k in (n.admin_labels || {})) && !builtIn.has(k));
+        const sel = (v) => (n.network === v ? "selected" : "");
+        const form = await modal(`Edit ${n.name}`, html`
+          <div class="stack" style="gap:12px">
+            <label class="field">Location <input type="text" name="location" value="${n.location}" placeholder="home, office, vastai"></label>
+            <label class="field">Network
+              <select name="network">
+                <option value="" ${sel("")}>Detect from its address (now: ${n.remote ? "remote" : "local"})</option>
+                <option value="local" ${sel("local")}>Local (LAN or VPN)</option>
+                <option value="remote" ${sel("remote")}>Remote (over the internet)</option>
+              </select>
+              <span class="hint">The scheduler prefers local nodes; jobs can refuse remote ones.</span></label>
+            <label class="check"><input type="checkbox" name="ephemeral" ${n.ephemeral ? "checked" : ""}>
+              Ephemeral: rented/cloud machine, removed automatically when offline too long</label>
+            <label class="field">Labels (KEY=VALUE, one per line or comma separated)
+              <textarea name="labels" rows="4">${kvText(n.admin_labels, "\n")}</textarea>
+              <span class="hint">Jobs can require or prefer labels (--require gpu=4090). These override labels the
+              worker reports itself${worker.length ? html`: ${worker.map(([k, v]) => html`<span class="chip">${k}=${v}</span> `)}` : ""}.</span></label>
+          </div>`, { okText: "Save" });
         if (!form) return;
+        await api.put(path + "/settings", {
+          location: form.location.value.trim(), network: form.network.value, ephemeral: form.ephemeral.checked,
+        });
         await api.put(path + "/labels", parseKV(form.labels.value));
-        toast("Labels saved", "ok");
+        toast("Saved", "ok");
         break;
       }
       case "revoke":

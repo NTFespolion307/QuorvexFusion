@@ -280,6 +280,9 @@ Usage: ./install.sh controller [options]
                           machine (put in the certificate and join commands)
   --admin-password PW     admin password (or set CLUSTER_ADMIN_PASSWORD;
                           generated and printed if not given non-interactively)
+  --domain NAME           get a Let's Encrypt certificate for the web UI for this
+                          domain (port 443 on it must reach this machine's UI port)
+  --acme-email EMAIL      contact email for Let's Encrypt (optional)
   --no-mdns               don't advertise on the LAN
   --with-worker           also run a worker on this machine
   --no-worker             don't
@@ -292,7 +295,7 @@ EOF
 
 cmd_controller() {
   local data="" node_port="" http_port="" listen_ip="" public_addr="" password="${CLUSTER_ADMIN_PASSWORD:-}"
-  local mdns=1 with_worker="" worker_location="" generated_pw=0
+  local mdns=1 with_worker="" worker_location="" generated_pw=0 domain="" acme_email=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --data-dir) data=$2; shift ;;
@@ -302,6 +305,8 @@ cmd_controller() {
       --public-addr) public_addr=$2; shift ;;
       --admin-password) password=$2; shift ;;
       --no-mdns) mdns=0 ;;
+      --domain) domain=$2; shift ;;
+      --acme-email) acme_email=$2; shift ;;
       --with-worker) with_worker=1 ;;
       --no-worker) with_worker=0 ;;
       --worker-location) worker_location=$2; shift ;;
@@ -391,7 +396,15 @@ cmd_controller() {
     node_addr=$(printf '%s' "$out" | sed -n 's/.*"node_addr":"\([^"]*\)".*/\1/p')
     ui_url=$(printf '%s' "$out" | sed -n 's/.*"ui_url":"\([^"]*\)".*/\1/p')
     ok "Controller initialised in $data"
-  else
+  fi
+  if [ -n "$domain" ]; then
+    local set_args=(controller set --data-dir "$data" --domain "$domain" --restart=false)
+    [ -n "$acme_email" ] && set_args+=(--acme-email "$acme_email")
+    "$BIN" "${set_args[@]}" >/dev/null
+    ui_url="https://$domain:${http_port:-8443}"
+    ok "Let's Encrypt enabled for $domain"
+  fi
+  if [ "$existing" = 1 ]; then
     node_port=$(sed -n 's/.*"node_listen": *"[^"]*:\([0-9]*\)".*/\1/p' "$data/controller.json")
     http_port=$(sed -n 's/.*"http_listen": *"[^"]*:\([0-9]*\)".*/\1/p' "$data/controller.json")
     listen_ip=$(sed -n 's/.*"node_listen": *"\([^"]*\):[0-9]*".*/\1/p' "$data/controller.json")

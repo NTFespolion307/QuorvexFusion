@@ -111,6 +111,7 @@ function showResult(res) {
     ${cmd("On the new machine, inside the repository (same network):", "sudo ./install.sh worker")}
     ${cmd("From another network:", `sudo ./install.sh worker --controller ${res.node_addr} --code ${res.code}`)}
     ${cmd("New machine without a copy of the repository yet:", res.commands.install)}
+    ${cmd("One line for cloud-init or a vast.ai on-start script (as root; add --location vastai --ephemeral for rented machines):", res.commands.bootstrap)}
     ${cmd("Binary already installed (containers, supervisors):", res.commands.direct)}`);
   box.querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", () => copyText(b.dataset.copy)));
 }

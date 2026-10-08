@@ -62,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	authed.HandleFunc("POST /api/v1/nodes/{id}/revoke", s.revokeNode)
 	authed.HandleFunc("PUT /api/v1/nodes/{id}/labels", s.setNodeLabels)
 	authed.HandleFunc("POST /api/v1/nodes/{id}/drain", s.drainNode)
+	authed.HandleFunc("PUT /api/v1/nodes/{id}/settings", s.setNodeSettings)
 	authed.HandleFunc("DELETE /api/v1/nodes/{id}", s.deleteNode)
 
 	authed.HandleFunc("POST /api/v1/jobs", s.submitJob)

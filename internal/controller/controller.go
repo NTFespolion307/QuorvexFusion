@@ -92,6 +92,9 @@ func (c *Controller) serverNames() []string {
 	if c.cfg.PublicAddr != "" {
 		names = append(names, c.cfg.PublicAddr)
 	}
+	if c.cfg.Domain != "" {
+		names = append(names, c.cfg.Domain)
+	}
 	names = append(names, c.cfg.ExtraNames...)
 	addrs, _ := net.InterfaceAddrs()
 	for _, a := range addrs {
@@ -136,10 +139,11 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	if err != nil {
 		return fmt.Errorf("node listener: %w", err)
 	}
+	webTLS, acmeHTTP := c.webTLS(serverCert)
 	httpServer := &http.Server{
 		Addr:              c.cfg.HTTPListen,
 		Handler:           httpHandler,
-		TLSConfig:         &tls.Config{Certificates: []tls.Certificate{serverCert}, MinVersion: tls.VersionTLS12},
+		TLSConfig:         webTLS,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	httpLn, err := net.Listen("tcp", c.cfg.HTTPListen)
@@ -155,6 +159,13 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	errc := make(chan error, 2)
 	go func() { errc <- grpcServer.Serve(nodeLn) }()
 	go func() { errc <- httpServer.ServeTLS(httpLn, "", "") }()
+	if acmeHTTP != nil {
+		go func() {
+			if err := acmeHTTP.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				c.log.Error("Let's Encrypt HTTP challenge listener", "addr", acmeHTTP.Addr, "err", err)
+			}
+		}()
+	}
 	if !c.cfg.DisableMDNS {
 		c.advertise()
 	}
@@ -162,6 +173,7 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	go c.schedulerLoop(ctx)
 	go c.poolSampler(ctx)
 	go c.maintenanceLoop(ctx)
+	go c.ephemeralLoop(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -174,6 +186,7 @@ func (c *Controller) Run(ctx context.Context, httpHandler http.Handler) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+	shutdownQuietly(acmeHTTP)
 	grpcServer.Stop() // control streams are long-lived; don't wait for them
 	if errors.Is(err, http.ErrServerClosed) || errors.Is(err, grpc.ErrServerStopped) {
 		err = nil

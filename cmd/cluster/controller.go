@@ -55,7 +55,7 @@ func controllerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&httpListen, "http-listen", ":8443", "address of the web UI and API")
 	cmd.Flags().StringVar(&publicAddr, "public-addr", "", "host name or IP that workers and browsers use to reach this controller")
 
-	cmd.AddCommand(controllerInitCmd(&dataDir), controllerPasswdCmd(&dataDir))
+	cmd.AddCommand(controllerInitCmd(&dataDir), controllerPasswdCmd(&dataDir), controllerSetCmd(&dataDir))
 	return cmd
 }
 

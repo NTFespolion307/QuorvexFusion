@@ -126,11 +126,16 @@ async function login(page) {
     check("resume clears draining", true);
 
     // Labels dialog.
-    await page.locator(".node-card").first().locator("[data-action=labels]").click();
+    await page.locator(".node-card").first().locator("[data-action=edit]").click();
     await page.fill(".modal textarea", "gpu=none\nzone=ui-test");
+    await page.fill(".modal input[name=location]", "lab");
+    await page.selectOption(".modal select[name=network]", "remote");
     await page.click(".modal button[type=submit]");
     await page.waitForSelector(".chip:has-text('zone=ui-test')");
     check("labels can be edited", true);
+    await page.waitForSelector(".node-card .badge:has-text('remote')");
+    check("network override marks the node remote", true);
+    check("location can be edited", (await page.locator(".node-card .sub", { hasText: "lab" }).count()) > 0);
 
     // Theme toggle and logout.
     await page.click("#theme-toggle");

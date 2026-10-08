@@ -206,6 +206,8 @@ type NodeView struct {
 	Status        string            `json:"status"` // pending | online | offline | revoked
 	Location      string            `json:"location"`
 	Ephemeral     bool              `json:"ephemeral"`
+	Remote        bool              `json:"remote"`  // connects over the public internet (or set by the admin)
+	Network       string            `json:"network"` // admin override: "", "local" or "remote"
 	Draining      bool              `json:"draining"`
 	Labels        map[string]string `json:"labels"`       // effective: worker + admin + built-in
 	AdminLabels   map[string]string `json:"admin_labels"` // set in the UI/CLI; override worker labels
@@ -225,6 +227,7 @@ type NodeView struct {
 func (c *Controller) nodeView(n *store.Node) *NodeView {
 	v := &NodeView{
 		ID: n.ID, Name: n.Name, Status: string(n.Status), Location: n.Location, Ephemeral: n.Ephemeral,
+		Remote: isRemote(n), Network: n.Network,
 		Draining: n.Draining, Labels: n.EffectiveLabels(), AdminLabels: n.Labels, Addr: n.Addr, SharedStorage: n.SharedStorage,
 		CreatedAt: n.CreatedAt, LastSeen: n.LastSeen,
 	}

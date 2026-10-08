@@ -168,7 +168,7 @@ func (c *Controller) nodeSnapshotLocked() (map[string]*scheduler.Node, error) {
 		sn := &scheduler.Node{
 			ID: n.ID, CPUs: hw.CpuLimit, MemoryBytes: hw.MemoryBytes,
 			Labels: n.EffectiveLabels(), Docker: hw.Docker, NvidiaDocker: hw.NvidiaDocker,
-			Ephemeral: n.Ephemeral, Draining: n.Draining, SharedStorage: n.SharedStorage != "",
+			Ephemeral: n.Ephemeral, Remote: isRemote(n), Draining: n.Draining, SharedStorage: n.SharedStorage != "",
 		}
 		for _, g := range hw.Gpus {
 			sn.GPUs = append(sn.GPUs, scheduler.GPU{Index: int(g.Index), UUID: g.Uuid, Vendor: g.Vendor})

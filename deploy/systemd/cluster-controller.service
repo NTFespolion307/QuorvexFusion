@@ -9,6 +9,8 @@ Wants=network-online.target
 User=@USER@
 Group=@USER@
 ExecStart=@BIN@ controller --data-dir @DATA_DIR@
+# Allows ports below 1024 (e.g. 443 for the UI, 80 for Let's Encrypt).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=3
 LimitNOFILE=65536

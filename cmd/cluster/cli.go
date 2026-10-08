@@ -258,6 +258,9 @@ func nodesCmd() *cobra.Command {
 				if n.Ephemeral {
 					status += ",ephemeral"
 				}
+				if n.Remote {
+					status += ",remote"
+				}
 				fmt.Fprintf(t, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					n.ID, n.Name, status, n.Location, cpus, mem, gpus, cpuPct, memPct, rtt, n.Addr)
 			}
@@ -281,6 +284,56 @@ func nodesCmd() *cobra.Command {
 			return nil
 		},
 	})
+
+	var location, network string
+	var ephemeral bool
+	var labels []string
+	setCmd := &cobra.Command{
+		Use:   "set <node>",
+		Short: "Change a node's location, ephemeral flag, local/remote setting or labels",
+		Example: `  cluster nodes set gpu-box-1 --location vastai --ephemeral
+  cluster nodes set office-pc --network local --label gpu=3090
+  cluster nodes set office-pc --network auto`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var n controller.NodeView
+			path := "/api/v1/nodes/" + url.PathEscape(args[0])
+			if err := call("GET", path, nil, &n); err != nil {
+				return err
+			}
+			f := cmd.Flags()
+			ns := store.NodeSettings{Location: n.Location, Ephemeral: n.Ephemeral, Network: n.Network}
+			if f.Changed("location") {
+				ns.Location = location
+			}
+			if f.Changed("ephemeral") {
+				ns.Ephemeral = ephemeral
+			}
+			if f.Changed("network") {
+				ns.Network = strings.TrimPrefix(network, "auto")
+			}
+			if err := call("PUT", path+"/settings", ns, nil); err != nil {
+				return err
+			}
+			if f.Changed("label") {
+				l, err := parseKV(labels, "--label")
+				if err != nil {
+					return err
+				}
+				if err := call("PUT", path+"/labels", l, nil); err != nil {
+					return err
+				}
+			}
+			fmt.Printf("%s: updated\n", n.Name)
+			return nil
+		},
+	}
+	sf := setCmd.Flags()
+	sf.StringVar(&location, "location", "", "location label, e.g. home, vastai")
+	sf.BoolVar(&ephemeral, "ephemeral", false, "rented/cloud node, removed automatically when offline too long")
+	sf.StringVar(&network, "network", "", "auto (detect from its address), local or remote")
+	sf.StringArrayVar(&labels, "label", nil, "replace the admin labels with these KEY=VALUE labels (repeatable)")
+	cmd.AddCommand(setCmd)
 
 	for _, action := range []struct{ name, short, method, suffix string }{
 		{"approve", "Approve a pending node", "POST", "/approve"},
@@ -313,6 +366,16 @@ func printNode(n *controller.NodeView) {
 	row("Status", n.Status)
 	row("Location", n.Location)
 	row("Ephemeral", fmt.Sprint(n.Ephemeral))
+	network := "local"
+	if n.Remote {
+		network = "remote"
+	}
+	if n.Network == "" {
+		network += " (detected from its address)"
+	} else {
+		network += " (set by admin)"
+	}
+	row("Network", network)
 	row("Address", n.Addr)
 	if n.Status == "online" {
 		row("Latency", fmt.Sprintf("%.1f ms", n.RTTMillis))
@@ -394,6 +457,7 @@ func tokenCmd() *cobra.Command {
 			fmt.Printf("Join code (shown only once):  %s\n\n", resp.Code)
 			fmt.Printf("On the new machine, in a checkout of the repository, run\n  sudo ./install.sh worker\n")
 			fmt.Printf("and enter the code; on another network add --controller %s --code %s\n\n", resp.NodeAddr, resp.Code)
+			fmt.Printf("One line, for cloud-init or a vast.ai on-start script (run as root):\n  %s\n\n", resp.Commands.Bootstrap)
 			fmt.Printf("With the binary already installed:\n  %s\n\n", resp.Commands.Direct)
 			fmt.Printf("For scripts, the same token in long form (use with --ca-fingerprint %s):\n  %s\n", resp.CAFingerprint, resp.Token)
 			return nil

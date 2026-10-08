@@ -178,6 +178,10 @@ CREATE TABLE task_outputs (
 );
 CREATE INDEX task_outputs_sha ON task_outputs(sha256);
 `,
+	// 6: per-node override of the automatic local/remote detection
+	`
+ALTER TABLE nodes ADD COLUMN network TEXT NOT NULL DEFAULT ''; -- '' (auto) | local | remote
+`,
 }
 
 func (s *Store) migrate() error {

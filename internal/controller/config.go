@@ -33,6 +33,18 @@ type Config struct {
 
 	// DisableMDNS stops advertising the controller on the local network.
 	DisableMDNS bool `json:"disable_mdns,omitempty"`
+
+	// EphemeralTimeoutSec: ephemeral (rented/cloud) nodes offline this long
+	// are removed automatically. 0 means never.
+	EphemeralTimeoutSec int `json:"ephemeral_timeout_sec"`
+
+	// Domain, if set, gets a Let's Encrypt certificate for the web UI and
+	// API (the node port keeps the cluster's own CA). Let's Encrypt must
+	// reach this machine at Domain on port 443 (forwarded to HTTPListen)
+	// or, with ACMEHTTPListen, on port 80.
+	Domain         string `json:"domain,omitempty"`
+	ACMEEmail      string `json:"acme_email,omitempty"`
+	ACMEHTTPListen string `json:"acme_http_listen,omitempty"` // e.g. ":80"; empty = TLS-ALPN on the UI port only
 }
 
 func DefaultConfig(dataDir string) *Config {
@@ -42,6 +54,7 @@ func DefaultConfig(dataDir string) *Config {
 		HTTPListen:          ":8443",
 		HeartbeatTimeoutSec: 15,
 		MetricsIntervalSec:  5,
+		EphemeralTimeoutSec: 3600,
 	}
 }
 
@@ -98,7 +111,14 @@ func (c *Config) UIURL() string {
 	if err != nil {
 		port = "8443"
 	}
-	return "https://" + net.JoinHostPort(c.advertisedHost(), port)
+	host := c.advertisedHost()
+	if c.Domain != "" {
+		host = c.Domain // the name with the Let's Encrypt certificate
+	}
+	if port == "443" {
+		return "https://" + host
+	}
+	return "https://" + net.JoinHostPort(host, port)
 }
 
 func (c *Config) advertisedHost() string {

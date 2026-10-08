@@ -65,6 +65,8 @@ export async function render(main, [id], ctx) {
       <dt>Status</dt><dd>${n.status}${n.status === "online" ? html` · ${num(n.rtt_ms)} ms round trip · connected ${ago(n.connected_at)}` : html` · last seen ${ago(n.last_seen)}`}</dd>
       <dt>Address</dt><dd class="mono">${n.addr || "-"}</dd>
       <dt>Location</dt><dd>${n.location || "-"}</dd>
+      <dt>Network</dt><dd>${n.remote ? "remote (over the internet)" : "local (LAN or VPN)"} <span class="faint small">${n.network ? "set by admin" : "detected from its address"}</span></dd>
+      <dt>Ephemeral</dt><dd>${n.ephemeral ? "yes: removed automatically when offline too long" : "no"}</dd>
       <dt>OS</dt><dd>${hw.os || "-"} · kernel ${hw.kernel || "-"} · ${hw.arch || ""}</dd>
       <dt>CPU</dt><dd>${hw.cpu_model || "-"}<br><span class="dim">${hw.physical_cores} cores / ${hw.logical_cores} threads${hw.cpu_limit < hw.logical_cores ? html`, limited to ${num(hw.cpu_limit)} by cgroup` : ""}</span></dd>
       <dt>Memory</dt><dd>${bytes(hw.memory_bytes)}</dd>
