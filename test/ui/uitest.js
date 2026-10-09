@@ -146,6 +146,23 @@ async function login(page) {
     await page.waitForFunction(() => /3 lib-test\/words.txt/.test(document.querySelector("#log")?.textContent || ""), null, { timeout: 10000 });
     check("library input was in the working directory", true);
 
+    // "Run" on a library script opens a prefilled job.
+    await page.goto(base + "/#/files");
+    await page.fill("#dest", "lib-test");
+    await page.setInputFiles("#pick-files", { name: "say.sh", mimeType: "text/plain", buffer: Buffer.from("echo ran from the library with $1\n") });
+    await page.waitForSelector("[data-run='lib-test/say.sh']");
+    await page.click("[data-run='lib-test/say.sh']");
+    await page.waitForFunction(() => document.querySelector("textarea[name=command]")?.value === "bash lib-test/say.sh");
+    check("Run prefills the command and selects the file",
+      (await page.evaluate(() => [...document.querySelector("select[name=library]").selectedOptions].map((o) => o.value).join())) === "lib-test/say.sh");
+    await page.fill("textarea[name=command]", "bash lib-test/say.sh hello");
+    await page.fill("input[name=cpus]", "0.5");
+    await page.click("#submit button[type=submit]");
+    await page.waitForURL(/#\/jobs\/j[0-9a-f]+$/);
+    await page.click("#tasks tbody tr >> nth=0");
+    await page.waitForFunction(() => (document.querySelector("#log")?.textContent || "").includes("ran from the library with hello"), null, { timeout: 20000 });
+    check("library script ran", true);
+
     // Live log of a running task.
     await page.goto(`${base}/#/tasks/${LOG_TASK_ID}`);
     await page.waitForFunction(() => /line [3-9]/.test(document.querySelector("#log")?.textContent || ""), null, { timeout: 20000 });

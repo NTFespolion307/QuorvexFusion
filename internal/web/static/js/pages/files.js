@@ -5,6 +5,18 @@ import { api } from "../api.js";
 import { uploadFile } from "../upload.js";
 import { html, setHTML, toast, bytes, dateTime, bar, pct, coalesce, confirmDialog } from "../util.js";
 
+// Interpreters for scripts in the library. Library files are placed
+// read-only (not executable), so scripts are started through these.
+export const INTERPRETERS = { py: "python3", sh: "bash", bash: "bash", r: "Rscript", js: "node", pl: "perl", rb: "ruby", jl: "julia" };
+
+export function runCommand(path) {
+  const ext = path.split(".").pop().toLowerCase();
+  const quoted = /^[A-Za-z0-9_@%+=:,./-]+$/.test(path) ? path : "'" + path.replace(/'/g, `'"'"'`) + "'";
+  return `${INTERPRETERS[ext] || "bash"} ${quoted}`;
+}
+
+const isScript = (path) => path.split(".").pop().toLowerCase() in INTERPRETERS;
+
 // Library paths are "a/b/c.txt"; folders are path prefixes.
 function encodePath(p) { return encodeURIComponent(p); }
 
@@ -72,7 +84,7 @@ export async function render(main, _params, ctx) {
         ${here.map((f) => html`<tr>
           <td class="truncate"><a href="/api/v1/files/content?path=${encodePath(f.path)}" title="download">${f.path.slice(prefix.length)}</a></td>
           <td class="nowrap">${bytes(f.size)}</td><td class="nowrap faint small">${dateTime(f.uploaded_at)}</td>
-          <td class="right"><button class="btn sm danger" data-delete="${f.path}" data-kind="file">Delete</button></td></tr>`)}
+          <td class="right nowrap">${isScript(f.path) ? html`<button class="btn sm primary" data-run="${f.path}">Run</button> ` : ""}<button class="btn sm danger" data-delete="${f.path}" data-kind="file">Delete</button></td></tr>`)}
       </tbody></table></div>`);
   };
 
@@ -86,6 +98,13 @@ export async function render(main, _params, ctx) {
       folder = nav.dataset.folder;
       dest.value = folder;
       draw();
+      return;
+    }
+    const run = e.target.closest("[data-run]");
+    if (run) {
+      // The jobs page picks this up and opens a prefilled New job form.
+      sessionStorage.setItem("run-library-file", run.dataset.run);
+      location.hash = "#/jobs";
       return;
     }
     const del = e.target.closest("[data-delete]");

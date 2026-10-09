@@ -125,7 +125,10 @@ cluster outputs <job> --list
   cluster submit --file city --output 'frames/*' -- 'blender -b city/scene.blend ...'
   ```
   In the web UI, pick them under *Inputs from your files* on the New job
-  form. Browser uploads go in 8 MB chunks and resume after a dropped
+  form, or press **Run** next to a script on the *Files* page to open a job
+  that runs it (`python3 ...` for `.py`, `bash ...` for `.sh`, ...). Library
+  files are read-only in the task, so scripts are started through their
+  interpreter. Browser uploads go in 8 MB chunks and resume after a dropped
   connection (pick the same file again if the page was closed).
 - **Shared storage**: if nodes mount the same storage (NFS, a NAS), start
   their workers with `--shared-storage /mnt/shared` (or set

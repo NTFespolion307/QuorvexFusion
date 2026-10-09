@@ -4,6 +4,7 @@ import { api } from "../api.js";
 import { html, setHTML, toast, stateBadge, ago, num, bytes, bar, pct, parseKV, coalesce, confirmDialog } from "../util.js";
 import { EXAMPLES, applyExample } from "../examples.js";
 import { uploadFile } from "../upload.js";
+import { runCommand } from "./files.js";
 export { outputLink };
 
 // Link to download one output file of a task.
@@ -91,6 +92,19 @@ export async function render(main, _params, ctx) {
     form.command.focus();
     loadLibrary().catch(() => {});
   });
+
+  // "Run" on the Files page: open the form with that script attached.
+  const runFile = sessionStorage.getItem("run-library-file");
+  if (runFile) {
+    sessionStorage.removeItem("run-library-file");
+    toggle(true);
+    await loadLibrary();
+    for (const o of form.library.options) o.selected = o.value === runFile;
+    form.command.value = runCommand(runFile);
+    form.name.value = runFile.split("/").pop();
+    form.command.focus();
+    form.command.setSelectionRange(form.command.value.length, form.command.value.length);
+  }
   document.getElementById("cancel-form").addEventListener("click", () => toggle(false));
   // Show how many tasks the array field produces while typing.
   form.array.addEventListener("input", () => {
