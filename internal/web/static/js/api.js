@@ -51,7 +51,7 @@ export function connectEvents(onStatus) {
   source = new EventSource("/api/v1/events");
   source.onopen = () => onStatus(true);
   source.onerror = () => onStatus(false); // the browser reconnects by itself
-  for (const topic of ["nodes", "jobs", "metrics"]) {
+  for (const topic of ["nodes", "jobs", "metrics", "files"]) {
     source.addEventListener(topic, () => handlers.get(topic)?.forEach((fn) => fn()));
   }
 }

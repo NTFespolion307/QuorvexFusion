@@ -3,6 +3,7 @@
 import { api } from "../api.js";
 import { html, setHTML, toast, stateBadge, ago, num, bytes, bar, pct, parseKV, coalesce, confirmDialog } from "../util.js";
 import { EXAMPLES, applyExample } from "../examples.js";
+import { uploadFile } from "../upload.js";
 export { outputLink };
 
 // Link to download one output file of a task.
@@ -54,6 +55,9 @@ export async function render(main, _params, ctx) {
           <span class="hint">Placed in each task's working directory.</span></label>
         <label class="field">Input folder <input type="file" name="folder" webkitdirectory multiple>
           <span class="hint">Kept as a folder of the same name.</span></label>
+        <label class="field">Inputs from your files
+          <select name="library" multiple size="4"></select>
+          <span class="hint">Already uploaded on the Files page; Ctrl/Cmd-click for several. Folders bring everything in them.</span></label>
         <label class="field">Outputs to collect
           <input type="text" name="outputs" placeholder="frames/*.png, results/**">
           <span class="hint">Globs relative to the working directory.</span></label>
@@ -68,7 +72,25 @@ export async function render(main, _params, ctx) {
 
   const form = document.getElementById("submit");
   const toggle = (show) => form.classList.toggle("hidden", !show);
-  document.getElementById("toggle-form").addEventListener("click", () => { toggle(form.classList.contains("hidden")); form.command.focus(); });
+  // The library picker lists folders first, then files.
+  let library = [];
+  const loadLibrary = async () => {
+    library = await api.get("/files");
+    const folders = new Set();
+    for (const f of library) {
+      const parts = f.path.split("/");
+      for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join("/"));
+    }
+    setHTML(form.library, html`${[...folders].sort().map((d) => html`<option value="${d}/">📁 ${d}/</option>`)}
+      ${library.map((f) => html`<option value="${f.path}">${f.path} (${bytes(f.size)})</option>`)}`);
+    form.library.disabled = library.length === 0;
+    if (!library.length) setHTML(form.library, html`<option disabled>No files yet: see the Files page</option>`);
+  };
+  document.getElementById("toggle-form").addEventListener("click", () => {
+    toggle(form.classList.contains("hidden"));
+    form.command.focus();
+    loadLibrary().catch(() => {});
+  });
   document.getElementById("cancel-form").addEventListener("click", () => toggle(false));
   // Show how many tasks the array field produces while typing.
   form.array.addEventListener("input", () => {
@@ -95,7 +117,7 @@ export async function render(main, _params, ctx) {
       const spec = specFromForm(form.elements);
       const script = form.script.files[0];
       if (!script && !spec.command && !spec.image) throw new Error("Enter a command, choose a script, or give a Docker image");
-      spec.inputs = await uploadInputs(form);
+      spec.inputs = [...await uploadInputs(form), ...libraryInputs(form, library)];
       if (script) spec.command = (await scriptCommand(script)) + (spec.command ? " " + spec.command : "");
       const job = await api.post("/jobs", spec);
       toast(`Submitted ${job.id} (${job.task_count} task${job.task_count === 1 ? "" : "s"})`, "ok");
@@ -146,6 +168,24 @@ export async function render(main, _params, ctx) {
 
 // --- input files ---------------------------------------------------------
 
+// libraryInputs turns the selected library files and folders into inputs.
+// Files keep their library path inside the task's working directory.
+function libraryInputs(form, library) {
+  const picked = [...form.library.selectedOptions].map((o) => o.value);
+  const seen = new Set();
+  const out = [];
+  for (const sel of picked) {
+    for (const f of library) {
+      const match = sel.endsWith("/") ? f.path.startsWith(sel) : f.path === sel;
+      if (match && !seen.has(f.path)) {
+        seen.add(f.path);
+        out.push({ path: f.path, sha256: f.sha256, size: f.size, mode: 0o644 });
+      }
+    }
+  }
+  return out;
+}
+
 // uploadInputs sends the chosen files to the controller (which hashes and
 // de-duplicates them) and returns the job's input list.
 async function uploadInputs(form) {
@@ -166,9 +206,9 @@ async function uploadInputs(form) {
   try {
     for (const it of items) {
       text.textContent = `Uploading ${it.path}`;
-      const res = await uploadOne(it.file, (n) => {
+      const res = await uploadFile(it.file, { onProgress: (n) => {
         barEl.style.width = (100 * (done + n) / Math.max(total, 1)).toFixed(1) + "%";
-      });
+      } });
       done += it.file.size;
       inputs.push({ path: it.path, sha256: res.sha256, size: res.size, mode: it.mode || 0o644 });
     }
@@ -178,24 +218,6 @@ async function uploadInputs(form) {
     throw err;
   }
   return inputs;
-}
-
-// uploadOne posts a file with upload progress (fetch can't report it).
-function uploadOne(file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/v1/blobs");
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
-    xhr.onload = () => {
-      if (xhr.status === 401) { location.href = "/login"; return; }
-      let body = {};
-      try { body = JSON.parse(xhr.responseText); } catch (e) { /* not JSON */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body);
-      else reject(new Error(body.error || `upload of ${file.name} failed (${xhr.status})`));
-    };
-    xhr.onerror = () => reject(new Error(`upload of ${file.name} failed: network error`));
-    xhr.send(file);
-  });
 }
 
 function shellQuote(s) {

@@ -210,7 +210,7 @@ func (s *Store) GC(referenced map[string]bool, grace time.Duration) (freed int64
 		if referenced[sha] {
 			return nil
 		}
-		if ValidSHA(sha) || strings.HasPrefix(name, "new-") {
+		if ValidSHA(sha) || strings.HasPrefix(name, "new-") || strings.HasPrefix(name, "up-") {
 			if os.Remove(p) == nil {
 				freed += info.Size()
 			}

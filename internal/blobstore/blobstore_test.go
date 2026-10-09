@@ -102,3 +102,42 @@ func TestPutAndGC(t *testing.T) {
 		t.Fatal("unreferenced blob kept")
 	}
 }
+
+func TestUploadSession(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	data := bytes.Repeat([]byte("xyz"), 100000)
+	id, err := s.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.SessionWrite(id, 0, bytes.NewReader(data[:120000])); err != nil || n != 120000 {
+		t.Fatalf("chunk 1: %d %v", n, err)
+	}
+	// A retried chunk at a stale offset is refused with the right offset.
+	var oe *OffsetError
+	if _, err := s.SessionWrite(id, 0, bytes.NewReader(data)); !errors.As(err, &oe) || oe.Have != 120000 {
+		t.Fatalf("stale offset: %v", err)
+	}
+	if have, _ := s.SessionSize(id); have != 120000 {
+		t.Fatalf("size %d", have)
+	}
+	if _, err := s.SessionWrite(id, 120000, bytes.NewReader(data[120000:])); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SessionFinish(id, int64(len(data))+1); err == nil {
+		t.Fatal("finish accepted a wrong size")
+	}
+	sha, size, err := s.SessionFinish(id, int64(len(data)))
+	if err != nil || sha != shaOf(data) || size != int64(len(data)) {
+		t.Fatalf("finish: %s %d %v", sha, size, err)
+	}
+	if _, ok := s.Size(sha); !ok {
+		t.Fatal("blob not stored")
+	}
+	if _, err := s.SessionSize(id); err == nil {
+		t.Fatal("session still exists after finish")
+	}
+	if _, err := s.SessionWrite("../../x", 0, bytes.NewReader(nil)); err == nil {
+		t.Fatal("path-like session id accepted")
+	}
+}

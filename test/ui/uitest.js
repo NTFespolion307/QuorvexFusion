@@ -121,6 +121,31 @@ async function login(page) {
     await page.waitForFunction(() => document.querySelector("#state")?.textContent.includes("succeeded"), null, { timeout: 30000 });
     check("hello example runs 8 tasks", (await page.locator("#tasks tbody tr").count()) === 8);
 
+    // File library: upload on the Files page, then use it in a job.
+    await page.goto(base + "/#/files");
+    await page.fill("#dest", "lib-test");
+    await page.setInputFiles("#pick-files", { name: "words.txt", mimeType: "text/plain", buffer: Buffer.from("alpha beta gamma\n") });
+    await page.waitForSelector("#queue td:has-text('done')");
+    await page.waitForSelector("#list a:has-text('words.txt')");
+    check("library upload lands in its folder", (await page.textContent("#crumbs")).includes("lib-test"));
+    const libHref = await page.getAttribute("#list a:has-text('words.txt')", "href");
+    check("library file downloads", (await page.evaluate(async (u) => (await fetch(u)).text(), libHref)) === "alpha beta gamma\n");
+    await page.screenshot({ path: `${out}/dark-files.png`, fullPage: true });
+
+    await page.goto(base + "/#/jobs");
+    await page.click("#toggle-form");
+    await page.waitForSelector("select[name=library] option[value='lib-test/']");
+    await page.selectOption("select[name=library]", ["lib-test/"]);
+    await page.fill("textarea[name=command]", "wc -w lib-test/words.txt");
+    await page.fill("input[name=cpus]", "0.5");
+    await page.click("#submit button[type=submit]");
+    await page.waitForURL(/#\/jobs\/j[0-9a-f]+$/);
+    await page.waitForFunction(() => document.querySelector("#state")?.textContent.match(/succeeded|failed/), null, { timeout: 30000 });
+    check("job with a library input succeeds", (await page.textContent("#state")).includes("succeeded"));
+    await page.click("#tasks tbody tr >> nth=0");
+    await page.waitForFunction(() => /3 lib-test\/words.txt/.test(document.querySelector("#log")?.textContent || ""), null, { timeout: 10000 });
+    check("library input was in the working directory", true);
+
     // Live log of a running task.
     await page.goto(`${base}/#/tasks/${LOG_TASK_ID}`);
     await page.waitForFunction(() => /line [3-9]/.test(document.querySelector("#log")?.textContent || ""), null, { timeout: 20000 });

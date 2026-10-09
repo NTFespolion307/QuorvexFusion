@@ -150,3 +150,34 @@ func TestReopenKeepsData(t *testing.T) {
 		t.Errorf("meta k = %q after reopen", v)
 	}
 }
+
+func TestLibraryFiles(t *testing.T) {
+	s := openTest(t)
+	now := time.Now()
+	for _, p := range []string{"scene_1/a.blend", "scene_1/tex/b.png", "scene11/c.blend", "solo.txt"} {
+		if err := s.PutLibraryFile(&LibraryFile{Path: p, SHA256: "sha-" + p, Size: 10, UploadedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Re-upload replaces.
+	_ = s.PutLibraryFile(&LibraryFile{Path: "solo.txt", SHA256: "new", Size: 20, UploadedAt: now})
+	if f, _ := s.LibraryFile("solo.txt"); f.SHA256 != "new" || f.Size != 20 {
+		t.Errorf("replace: %+v", f)
+	}
+	// A folder is a prefix; "_" must not act as a wildcard ("scene11").
+	got, _ := s.LibraryFiles("scene_1")
+	if len(got) != 2 {
+		t.Fatalf("folder scene_1: %d files", len(got))
+	}
+	if all, _ := s.LibraryFiles(""); len(all) != 4 {
+		t.Errorf("all: %d", len(all))
+	}
+	if n, _ := s.DeleteLibraryFiles("scene_1"); n != 2 {
+		t.Errorf("deleted %d", n)
+	}
+	refs := map[string]bool{}
+	_ = s.LibraryBlobs(refs)
+	if !refs["sha-scene11/c.blend"] || refs["sha-scene_1/a.blend"] {
+		t.Errorf("library blobs %v", refs)
+	}
+}

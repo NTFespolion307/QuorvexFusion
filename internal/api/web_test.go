@@ -160,3 +160,52 @@ func TestEventStream(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(lines, 0))
 }
+
+func TestResumableUploadAndLibrary(t *testing.T) {
+	srv := newTLSServer(t)
+	c := browser(t)
+	send(t, c, "POST", srv.URL+"/api/v1/session", `{"password":"admin-password"}`, srv.URL)
+	do := func(method, path, body string) (*http.Response, string) {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Origin", srv.URL)
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp, string(b)
+	}
+	_, out := do("POST", "/api/v1/uploads", "")
+	id := strings.Split(strings.Split(out, `"id":"`)[1], `"`)[0]
+
+	content := strings.Repeat("0123456789", 1000)
+	if r, _ := do("PUT", "/api/v1/uploads/"+id+"?offset=0", content[:4000]); r.StatusCode != 200 {
+		t.Fatalf("chunk 1: %d", r.StatusCode)
+	}
+	// The "connection dropped": the client resends from 0 and is told where to go on.
+	if r, body := do("PUT", "/api/v1/uploads/"+id+"?offset=0", content); r.StatusCode != 409 || !strings.Contains(body, `"offset":4000`) {
+		t.Fatalf("stale chunk: %d %s", r.StatusCode, body)
+	}
+	if r, _ := do("HEAD", "/api/v1/uploads/"+id, ""); r.Header.Get("X-Upload-Offset") != "4000" {
+		t.Fatalf("offset header %q", r.Header.Get("X-Upload-Offset"))
+	}
+	do("PUT", "/api/v1/uploads/"+id+"?offset=4000", content[4000:])
+	r, body := do("POST", "/api/v1/uploads/"+id+"/finish", `{"size":10000,"path":"proj/data/digits.txt"}`)
+	if r.StatusCode != 200 || !strings.Contains(body, `"path":"proj/data/digits.txt"`) {
+		t.Fatalf("finish: %d %s", r.StatusCode, body)
+	}
+
+	if _, body := do("GET", "/api/v1/files?path=proj", ""); !strings.Contains(body, "digits.txt") {
+		t.Errorf("library listing: %s", body)
+	}
+	if r, body := do("GET", "/api/v1/files/content?path=proj/data/digits.txt", ""); r.StatusCode != 200 || body != content {
+		t.Errorf("download: %d (%d bytes)", r.StatusCode, len(body))
+	}
+	if r, _ := do("POST", "/api/v1/files", `{"path":"../escape.txt","sha256":"`+strings.Repeat("a", 64)+`"}`); r.StatusCode != 400 {
+		t.Errorf("path escaping the library accepted: %d", r.StatusCode)
+	}
+	if r, body := do("DELETE", "/api/v1/files?path=proj", ""); r.StatusCode != 200 || !strings.Contains(body, `"deleted":1`) {
+		t.Errorf("delete folder: %d %s", r.StatusCode, body)
+	}
+}

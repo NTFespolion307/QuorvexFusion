@@ -115,6 +115,7 @@ func submitCmd() *cobra.Command {
 		noRemote             bool
 		wait, follow         bool
 		inputs, sharedInputs []string
+		libFiles             []string
 		script               string
 	)
 	cmd := &cobra.Command{
@@ -163,6 +164,11 @@ arguments).`,
 			if spec.Inputs, err = uploadInputs(local); err != nil {
 				return err
 			}
+			lib, err := libraryInputs(libFiles)
+			if err != nil {
+				return err
+			}
+			spec.Inputs = append(spec.Inputs, lib...)
 			for _, si := range sharedInputs {
 				src, dest := splitSrcDest(si)
 				if dest == "" {
@@ -231,6 +237,7 @@ arguments).`,
 	f.BoolVar(&noEphemeral, "no-ephemeral", false, "never run on ephemeral (rented/cloud) nodes")
 	f.BoolVar(&noRemote, "no-remote", false, "never run on remote nodes")
 	f.StringArrayVarP(&inputs, "input", "i", nil, "file or folder to place in each task's working directory, SRC or SRC:DEST (repeatable)")
+	f.StringArrayVar(&libFiles, "file", nil, "file or folder from the file library (cluster files), PATH or PATH:DEST (repeatable)")
 	f.StringArrayVar(&sharedInputs, "shared-input", nil, "path in the nodes' shared storage, linked without transfer: PATH or PATH:DEST (repeatable)")
 	f.StringArrayVarP(&spec.Outputs, "output", "o", nil, "files to collect after each task, a glob like 'out/*.png' or 'results/**' (repeatable)")
 	f.StringVar(&script, "script", "", "upload this script and run it; arguments after -- are passed to it")

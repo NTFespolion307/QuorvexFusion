@@ -182,6 +182,16 @@ CREATE INDEX task_outputs_sha ON task_outputs(sha256);
 	`
 ALTER TABLE nodes ADD COLUMN network TEXT NOT NULL DEFAULT ''; -- '' (auto) | local | remote
 `,
+	// 7: the file library (files uploaded to the controller for reuse in jobs)
+	`
+CREATE TABLE files (
+	path        TEXT PRIMARY KEY,      -- "scenes/city.blend"; folders are path prefixes
+	sha256      TEXT NOT NULL,
+	size        INTEGER NOT NULL,
+	uploaded_at INTEGER NOT NULL
+);
+CREATE INDEX files_sha ON files(sha256);
+`,
 }
 
 func (s *Store) migrate() error {

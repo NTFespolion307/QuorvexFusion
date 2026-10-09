@@ -51,6 +51,7 @@ func main() {
 		jobsCmd(),
 		logsCmd(),
 		outputsCmd(),
+		filesCmd(),
 		cancelCmd(),
 		nodesCmd(),
 		tokenCmd(),

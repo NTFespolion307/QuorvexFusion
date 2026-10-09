@@ -210,6 +210,10 @@ func (c *Controller) collectGarbage() {
 		c.log.Error("file cleanup", "err", err)
 		return
 	}
+	if err := c.store.LibraryBlobs(refs); err != nil {
+		c.log.Error("file cleanup", "err", err)
+		return
+	}
 	for _, raw := range specs {
 		var spec JobSpec
 		if json.Unmarshal([]byte(raw), &spec) == nil {

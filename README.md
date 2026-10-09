@@ -116,6 +116,17 @@ cluster outputs <job> --list
   timed-out tasks.
 - All transfers resume after interruptions. Progress shows in the CLI and on
   the task page.
+- **File library** (web UI *Files* page, or `cluster files`): upload files
+  and folders to the controller once, from wherever you are, then use them
+  in any number of jobs without uploading again:
+  ```sh
+  cluster files upload scene.blend textures/ --to city   # resumable; also from your PC after `cluster login`
+  cluster files ls
+  cluster submit --file city --output 'frames/*' -- 'blender -b city/scene.blend ...'
+  ```
+  In the web UI, pick them under *Inputs from your files* on the New job
+  form. Browser uploads go in 8 MB chunks and resume after a dropped
+  connection (pick the same file again if the page was closed).
 - **Shared storage**: if nodes mount the same storage (NFS, a NAS), start
   their workers with `--shared-storage /mnt/shared` (or set
   `CLUSTER_SHARED_STORAGE` in `/etc/cluster/worker.env`) and use
