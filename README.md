@@ -13,8 +13,8 @@ pool are scheduled onto them automatically.
 > **Status:** under active development. Working today: joining nodes,
 > hardware/metrics reporting, scheduling, shell jobs, array jobs, retries,
 > timeouts, live logs, cgroup limits, the installer, LAN discovery, the
-> web UI, file transfer, remote and ephemeral nodes, Let's Encrypt. Coming
-> next: Docker/GPU containers, release binaries.
+> web UI, file transfer, remote and ephemeral nodes, Let's Encrypt, Docker
+> and GPU containers. Coming next: release binaries and packaging.
 
 ## Quick start
 
@@ -123,6 +123,37 @@ cluster outputs <job> --list
   transfer. Such jobs only run on nodes with shared storage.
 - Workers keep at most 20 GiB of cached inputs by default
   (`--cache-max 100G` to change).
+
+## Docker containers and GPUs
+
+Run a task inside a container image instead of on the node directly, so
+nodes don't need your software installed:
+
+```sh
+cluster submit --image python:3.12-slim --input data/ --output 'out/*' -- python3 analyse.py
+cluster submit --image blender/blender:4.2 --gpus 1 --array 1-250:10 --input scene.blend --output 'frames/*' -- \
+  'blender -b scene.blend -o //frames/f_#### -s {i} -e $(( {i} + 9 )) -a'
+cluster submit -f --image nvidia/cuda:12.4.1-base-ubuntu22.04 --gpus 1 -- nvidia-smi
+```
+
+- The task's working directory (with its input files) is mounted at
+  `/work`, which is also the current directory; outputs are collected from
+  it as usual. With a command, it runs with `/bin/sh -c` inside the
+  container; without one, the image's default command runs.
+- `--cpus`, `--memory` and `--gpus` become Docker limits. A task asking for
+  GPUs gets exactly its assigned GPUs (`--gpus device=...`), numbered from 0
+  inside the container.
+- Container tasks only go to nodes where Docker works, and GPU containers
+  only to nodes with the [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+  (the node cards show "no docker" / "gpu containers").
+- Images are pulled on first use (the pull appears in the task log and does
+  not count against `--timeout`). For private registries, run `docker login`
+  on the nodes.
+- Containers run as the unprivileged task user, so files in `/work` stay
+  owned by it; images that must run as root inside may need adjusting.
+- Plain (non-container) GPU tasks work too, on any node with NVIDIA drivers:
+  `cluster submit --gpus 1 -- python3 train.py` sets `CUDA_VISIBLE_DEVICES`
+  to the task's GPUs.
 
 ## Web UI
 

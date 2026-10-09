@@ -9,6 +9,28 @@ import (
 	"strings"
 )
 
+// clusterVars are the variables describing a task, for plain and
+// container tasks alike.
+func clusterVars(a *attempt, work string) map[string]string {
+	as, spec := a.assign, a.assign.Spec
+	env := map[string]string{
+		"CLUSTER_JOB_ID":      as.JobId,
+		"CLUSTER_TASK_ID":     as.TaskId,
+		"CLUSTER_ATTEMPT_ID":  as.AttemptId,
+		"CLUSTER_ATTEMPT":     strconv.Itoa(int(as.Attempt)),
+		"CLUSTER_ARRAY_INDEX": strconv.FormatInt(as.ArrayIndex, 10),
+		"CLUSTER_CPUS":        strconv.FormatFloat(spec.Cpus, 'f', -1, 64),
+		"CLUSTER_WORKDIR":     work,
+	}
+	// Libraries like OpenMP/MKL otherwise start one thread per machine
+	// core, oversubscribing the CPUs the task was given.
+	threads := strconv.Itoa(max(1, int(math.Ceil(spec.Cpus))))
+	for _, k := range []string{"OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"} {
+		env[k] = threads
+	}
+	return env
+}
+
 // taskEnv builds a task's environment:
 //
 //  1. the worker's own environment (so e.g. CUDA/conda paths set up inside
@@ -41,21 +63,10 @@ func (r *Runner) taskEnv(a *attempt, work string) []string {
 		}
 	}
 
-	as, spec := a.assign, a.assign.Spec
-	env["CLUSTER_JOB_ID"] = as.JobId
-	env["CLUSTER_TASK_ID"] = as.TaskId
-	env["CLUSTER_ATTEMPT_ID"] = as.AttemptId
-	env["CLUSTER_ATTEMPT"] = strconv.Itoa(int(as.Attempt))
-	env["CLUSTER_ARRAY_INDEX"] = strconv.FormatInt(as.ArrayIndex, 10)
-	env["CLUSTER_CPUS"] = strconv.FormatFloat(spec.Cpus, 'f', -1, 64)
-	env["CLUSTER_WORKDIR"] = work
-
-	// Libraries like OpenMP/MKL otherwise start one thread per machine
-	// core, oversubscribing the CPUs the task was given.
-	threads := strconv.Itoa(max(1, int(math.Ceil(spec.Cpus))))
-	for _, k := range []string{"OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"} {
-		env[k] = threads
+	for k, v := range clusterVars(a, work) {
+		env[k] = v
 	}
+	spec := a.assign.Spec
 
 	// Each task sees only its own GPUs. NVIDIA devices are given by UUID so
 	// the mapping can't be confused by device ordering.

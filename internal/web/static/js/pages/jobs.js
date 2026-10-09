@@ -22,6 +22,7 @@ export async function render(main, _params, ctx) {
         <textarea name="command" rows="3" placeholder="python3 simulate.py --seed {i}"></textarea></label>
       <div class="form-grid">
         <label class="field">Name <input type="text" name="name" placeholder="defaults to the command"></label>
+        <label class="field">Docker image <input type="text" name="image" placeholder="optional, e.g. python:3.12-slim"></label>
         <label class="field">CPUs per task <input type="number" name="cpus" value="1" min="0.1" step="0.1"></label>
         <label class="field">Memory per task <input type="text" name="memory" placeholder="e.g. 4G (optional)"></label>
         <label class="field">GPUs per task <input type="number" name="gpus" value="0" min="0" step="1"></label>
@@ -53,7 +54,8 @@ export async function render(main, _params, ctx) {
           <span class="hint">Globs relative to the working directory.</span></label>
       </div>
       <div class="hidden" id="upload-progress"><div class="small dim" id="upload-text"></div><div class="bar thick"><span id="upload-bar" class="ok" style="width:0%"></span></div></div>
-      <p class="hint">Docker images arrive with the next milestone.</p>
+      <p class="hint">With a Docker image, the command runs inside the container in <code>/work</code>, where the input files are;
+        GPU containers need the NVIDIA container toolkit on the node.</p>
       <div class="row"><button class="btn primary" type="submit">Submit</button>
         <button class="btn ghost" type="button" id="cancel-form">Cancel</button></div>
     </form>
@@ -80,7 +82,7 @@ export async function render(main, _params, ctx) {
     try {
       const spec = specFromForm(form.elements);
       const script = form.script.files[0];
-      if (!script && !spec.command) throw new Error("Enter a command, or choose a script");
+      if (!script && !spec.command && !spec.image) throw new Error("Enter a command, choose a script, or give a Docker image");
       spec.inputs = await uploadInputs(form);
       if (script) spec.command = (await scriptCommand(script)) + (spec.command ? " " + spec.command : "");
       const job = await api.post("/jobs", spec);
@@ -241,6 +243,7 @@ function specFromForm(f) {
   const spec = {
     command: f.command.value.trim(),
     name: f.name.value.trim(),
+    image: f.image.value.trim(),
     cpus: Number(f.cpus.value) || 1,
     memory_bytes: parseSize(f.memory.value),
     gpus: Number(f.gpus.value) || 0,

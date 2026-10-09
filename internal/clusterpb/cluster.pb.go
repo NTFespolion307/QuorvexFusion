@@ -1211,8 +1211,12 @@ type TaskSpec struct {
 	TimeoutSeconds int64                  `protobuf:"varint,6,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"` // 0 = no timeout
 	Inputs         []*InputFile           `protobuf:"bytes,7,rep,name=inputs,proto3" json:"inputs,omitempty"`
 	Outputs        []string               `protobuf:"bytes,8,rep,name=outputs,proto3" json:"outputs,omitempty"` // globs relative to the working directory
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// image, if set, runs the task in a Docker container: the working
+	// directory is mounted at /work, and command (if any) runs with
+	// /bin/sh -c inside it; without a command the image's default runs.
+	Image         string `protobuf:"bytes,9,opt,name=image,proto3" json:"image,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskSpec) Reset() {
@@ -1299,6 +1303,13 @@ func (x *TaskSpec) GetOutputs() []string {
 		return x.Outputs
 	}
 	return nil
+}
+
+func (x *TaskSpec) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
 }
 
 // InputFile is placed at path (relative to the task's working directory)
@@ -2700,7 +2711,7 @@ const file_internal_clusterpb_cluster_proto_rawDesc = "" +
 	"\rGPUAssignment\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x05R\x05index\x12\x12\n" +
 	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x16\n" +
-	"\x06vendor\x18\x03 \x01(\tR\x06vendor\"\xe5\x02\n" +
+	"\x06vendor\x18\x03 \x01(\tR\x06vendor\"\xfb\x02\n" +
 	"\bTaskSpec\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12/\n" +
 	"\x03env\x18\x02 \x03(\v2\x1d.cluster.v1.TaskSpec.EnvEntryR\x03env\x12\x12\n" +
@@ -2709,7 +2720,8 @@ const file_internal_clusterpb_cluster_proto_rawDesc = "" +
 	"\x04gpus\x18\x05 \x03(\v2\x19.cluster.v1.GPUAssignmentR\x04gpus\x12'\n" +
 	"\x0ftimeout_seconds\x18\x06 \x01(\x03R\x0etimeoutSeconds\x12-\n" +
 	"\x06inputs\x18\a \x03(\v2\x15.cluster.v1.InputFileR\x06inputs\x12\x18\n" +
-	"\aoutputs\x18\b \x03(\tR\aoutputs\x1a6\n" +
+	"\aoutputs\x18\b \x03(\tR\aoutputs\x12\x14\n" +
+	"\x05image\x18\t \x01(\tR\x05image\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x80\x01\n" +

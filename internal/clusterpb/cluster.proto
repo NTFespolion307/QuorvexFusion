@@ -156,6 +156,10 @@ message TaskSpec {
   int64 timeout_seconds = 6;  // 0 = no timeout
   repeated InputFile inputs = 7;
   repeated string outputs = 8;  // globs relative to the working directory
+  // image, if set, runs the task in a Docker container: the working
+  // directory is mounted at /work, and command (if any) runs with
+  // /bin/sh -c inside it; without a command the image's default runs.
+  string image = 9;
 }
 
 // InputFile is placed at path (relative to the task's working directory)

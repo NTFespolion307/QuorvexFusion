@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -56,13 +57,17 @@ func lookupTaskUser(name string) (*taskUser, error) {
 // whole tree can be signalled; with systemd it also has its own scope unit
 // (a cgroup), which catches children that escape the process group.
 type proc struct {
-	cmd  *exec.Cmd
-	unit string // systemd scope name, "" without systemd
+	cmd       *exec.Cmd
+	unit      string // systemd scope name, "" without systemd
+	container string // docker container name, for container tasks
 }
 
 func scopeName(attemptID string) string { return "cluster-task-" + attemptID + ".scope" }
 
 func (r *Runner) startProcess(a *attempt, work string, stdout, stderr *os.File) (*proc, error) {
+	if a.assign.Spec.Image != "" {
+		return r.startContainer(a, work, stdout, stderr)
+	}
 	spec := a.assign.Spec
 	argv := []string{"/bin/sh", "-c", spec.Command}
 	sys := &syscall.SysProcAttr{Setpgid: true}
@@ -111,12 +116,60 @@ func (r *Runner) startProcess(a *attempt, work string, stdout, stderr *os.File) 
 	return p, nil
 }
 
+// startContainer runs the task in Docker. Docker enforces the CPU, memory
+// and GPU limits itself, so no systemd scope is used.
+func (r *Runner) startContainer(a *attempt, work string, stdout, stderr *os.File) (*proc, error) {
+	spec := a.assign.Spec
+	env, err := containerEnv(a)
+	if err != nil {
+		return nil, err
+	}
+	envFile := filepath.Join(a.dir, "container.env")
+	if err := os.WriteFile(envFile, []byte(strings.Join(env, "\n")+"\n"), 0o600); err != nil {
+		return nil, err
+	}
+	// Run as the task user (or, for an unprivileged worker, as the worker's
+	// own user) so files written to /work belong to the right user.
+	user := ""
+	switch {
+	case r.user != nil:
+		user = fmt.Sprintf("%d:%d", r.user.uid, r.user.gid)
+	case os.Geteuid() != 0:
+		user = fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	}
+	d := dockerRun{
+		Name: containerName(a.id), AttemptID: a.id, Image: spec.Image, Command: spec.Command,
+		Work: work, EnvFile: envFile, User: user, Shared: r.opts.SharedStorage,
+		CPUs: spec.Cpus, Memory: spec.MemoryBytes, GPUs: spec.Gpus,
+	}
+	// A leftover container with the same name (e.g. after a worker crash)
+	// would make docker run fail.
+	_ = exec.Command("docker", "rm", "-f", d.Name).Run()
+	cmd := exec.Command("docker", d.args()...)
+	cmd.Dir = work
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return &proc{cmd: cmd, container: d.Name}, nil
+}
+
 func (p *proc) pid() int    { return p.cmd.Process.Pid }
 func (p *proc) wait() error { return p.cmd.Wait() }
 func (p *proc) terminate()  { p.signal(syscall.SIGTERM) }
 func (p *proc) kill()       { p.signal(syscall.SIGKILL) }
 
 func (p *proc) signal(sig syscall.Signal) {
+	if p.container != "" {
+		// Signals to the docker client don't reliably reach the container;
+		// ask the daemon. "docker stop" waits, so don't block on it.
+		if sig == syscall.SIGKILL {
+			_ = exec.Command("docker", "kill", p.container).Run()
+		} else {
+			_ = exec.Command("docker", "stop", "-t", "10", p.container).Start()
+		}
+	}
 	_ = syscall.Kill(-p.cmd.Process.Pid, sig) // negative PID: the whole process group
 	if p.unit != "" {
 		systemctl("kill", "--signal="+strconv.Itoa(int(sig)), p.unit)
@@ -128,6 +181,14 @@ func (p *proc) signal(sig syscall.Signal) {
 func (p *proc) cleanup() {
 	if p.unit != "" {
 		systemctl("stop", p.unit)
+	}
+	if p.container != "" {
+		// Normally gone already (--rm). Repeat once: if the task was stopped
+		// while "docker run" was still creating the container, the daemon
+		// may finish creating it just after the first removal.
+		_ = exec.Command("docker", "rm", "-f", p.container).Run()
+		time.Sleep(time.Second)
+		_ = exec.Command("docker", "rm", "-f", p.container).Run()
 	}
 }
 
@@ -144,6 +205,9 @@ func killOrphan(attemptID, pidText string) {
 	}
 	if _, err := os.Stat("/run/systemd/system"); err == nil {
 		systemctl("stop", scopeName(attemptID))
+	}
+	if _, err := exec.LookPath("docker"); err == nil {
+		_ = exec.Command("docker", "rm", "-f", containerName(attemptID)).Run()
 	}
 }
 

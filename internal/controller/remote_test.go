@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	pb "github.com/NTFespolion307/QuorvexFusion/internal/clusterpb"
 	"github.com/NTFespolion307/QuorvexFusion/internal/store"
 )
 
@@ -99,5 +101,49 @@ func TestRemoteNodesAvoidedWhenRequested(t *testing.T) {
 	pass(t, c)
 	if as, _ := drain(home); len(as) != 1 {
 		t.Error("small job not placed on the local node")
+	}
+}
+
+func TestContainerJobsNeedDocker(t *testing.T) {
+	c, _ := newTestController(t)
+	plain := addNode(t, c, "plain", 8)
+	connectHW := func(id string, hw *pb.HardwareInfo) *Session {
+		now := time.Now()
+		_ = c.store.CreateNode(&store.Node{ID: id, Name: id, Status: store.NodeApproved, PubKeyFP: id, CreatedAt: now, ApprovedAt: &now})
+		sess := newSession(context.Background(), id, "test", &pb.Hello{Hardware: hw})
+		c.nodeConnected(id, nil)
+		c.hub.Register(sess)
+		return sess
+	}
+	docker := connectHW("docker", &pb.HardwareInfo{CpuLimit: 8, LogicalCores: 8, MemoryBytes: 16 << 30, Docker: true,
+		Gpus: []*pb.GPU{{Index: 0, Uuid: "GPU-1", Vendor: "nvidia"}}})
+	gpuBox := connectHW("gpubox", &pb.HardwareInfo{CpuLimit: 8, LogicalCores: 8, MemoryBytes: 16 << 30, Docker: true, NvidiaDocker: true,
+		Gpus: []*pb.GPU{{Index: 0, Uuid: "GPU-2", Vendor: "nvidia"}}})
+
+	cj := submit(t, c, JobSpec{Command: "echo", Image: "alpine", CPUs: 1})
+	gj := submit(t, c, JobSpec{Command: "nvidia-smi", Image: "nvidia/cuda", GPUs: 1})
+	pj := submit(t, c, JobSpec{Command: "nvidia-smi", GPUs: 1, Requires: map[string]string{"hostname": "docker"}}) // plain GPU task
+	pass(t, c)
+	as, _ := drain(plain)
+	if len(as) != 0 {
+		t.Errorf("container job placed on a node without Docker: %v", as)
+	}
+	asG, _ := drain(gpuBox)
+	asD, _ := drain(docker)
+	got := map[string]string{}
+	for _, a := range asG {
+		got[a.JobId] = "gpubox"
+		if a.JobId == gj.ID && (len(a.Spec.Gpus) != 1 || a.Spec.Image != "nvidia/cuda") {
+			t.Errorf("GPU container spec: %+v", a.Spec)
+		}
+	}
+	for _, a := range asD {
+		got[a.JobId] = "docker"
+	}
+	if got[gj.ID] != "gpubox" {
+		t.Errorf("GPU container went to %q, want the node with the NVIDIA toolkit", got[gj.ID])
+	}
+	if got[cj.ID] == "" || got[pj.ID] != "docker" {
+		t.Errorf("placements %v", got)
 	}
 }

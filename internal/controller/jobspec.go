@@ -18,6 +18,11 @@ type JobSpec struct {
 	Command string            `json:"command"` // run with /bin/sh -c
 	Env     map[string]string `json:"env,omitempty"`
 
+	// Image runs each task in this Docker image (e.g. "python:3.12" or
+	// "ghcr.io/org/tool:1.4"). The command then runs inside the container
+	// with /bin/sh -c; with no command, the image's own default runs.
+	Image string `json:"image,omitempty"`
+
 	CPUs        float64 `json:"cpus,omitempty"`         // default 1
 	MemoryBytes uint64  `json:"memory_bytes,omitempty"` // 0 = no reservation or limit
 	GPUs        int     `json:"gpus,omitempty"`
@@ -86,8 +91,12 @@ const (
 // Normalize fills defaults and validates the spec.
 func (s *JobSpec) Normalize() error {
 	s.Command = strings.TrimSpace(s.Command)
-	if s.Command == "" {
-		return errors.New("command is required")
+	s.Image = strings.TrimSpace(s.Image)
+	if s.Command == "" && s.Image == "" {
+		return errors.New("a command (or a Docker image) is required")
+	}
+	if strings.ContainsAny(s.Image, " \t\n") || strings.HasPrefix(s.Image, "-") {
+		return fmt.Errorf("invalid image name %q", s.Image)
 	}
 	if s.CPUs == 0 {
 		s.CPUs = 1
@@ -107,6 +116,9 @@ func (s *JobSpec) Normalize() error {
 	}
 	if err := s.normalizeFiles(); err != nil {
 		return err
+	}
+	if s.Name == "" && s.Command == "" {
+		s.Name = s.Image
 	}
 	if s.Name == "" {
 		s.Name = s.Command

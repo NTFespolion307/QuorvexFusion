@@ -80,7 +80,8 @@ export async function render(main, [id], ctx) {
     document.getElementById("delete").classList.toggle("hidden", active);
     document.getElementById("name").textContent = j.name;
     setHTML(document.getElementById("spec"), html`<dl class="kv">
-      <dt>Command</dt><dd><code>${s.command}</code></dd>
+      ${s.image ? html`<dt>Image</dt><dd class="mono">${s.image}</dd>` : ""}
+      <dt>Command</dt><dd>${s.command ? html`<code>${s.command}</code>` : html`<span class="dim">the image's default</span>`}</dd>
       <dt>Per task</dt><dd>${num(s.cpus)} CPU · ${s.memory_bytes ? bytes(s.memory_bytes) : "memory not reserved"} · ${s.gpus || 0} GPU</dd>
       ${s.array ? html`<dt>Array</dt><dd>${s.array}</dd>` : ""}
       <dt>Retries</dt><dd>${s.retries || 0}</dd>

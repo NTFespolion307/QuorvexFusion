@@ -316,6 +316,16 @@ func (r *Runner) runProcess(a *attempt) *pb.TaskResult {
 	}
 	defer stderr.Close()
 
+	if image := a.assign.Spec.Image; image != "" {
+		// Pulling can take minutes; it is not counted against the timeout.
+		if err := ensureImage(a.stop, image, stderr); err != nil {
+			if a.stop.Err() != nil {
+				return r.stoppedResult(a, 0)
+			}
+			return failedToStart(err)
+		}
+	}
+
 	p, err := r.startProcess(a, work, stdout, stderr)
 	if err != nil {
 		return failedToStart(err)
@@ -366,6 +376,9 @@ func (r *Runner) runProcess(a *attempt) *pb.TaskResult {
 	} else {
 		res.Outcome = pb.TaskResult_EXITED
 		res.ExitCode, res.Error = exitStatus(waitErr, a.assign.Spec.MemoryBytes > 0)
+		if a.assign.Spec.Image != "" && res.ExitCode == 125 && res.Error == "" {
+			res.Error = "docker could not start the container (see the task log)"
+		}
 	}
 	// Outputs of finished and timed-out tasks are kept (a timed-out task's
 	// partial results are often useful); cancelled or lost ones are not.

@@ -189,6 +189,8 @@ func taskRequest(t *store.Task, spec *JobSpec, preferNodes map[string]bool) *sch
 		Requires: spec.Requires, Prefers: spec.Prefers,
 		AllowEphemeral: spec.allowEphemeral(), AllowRemote: spec.allowRemote(),
 		NeedsShared: spec.needsShared(), PreferNodes: preferNodes,
+		// Containers need Docker; GPUs in containers need the NVIDIA toolkit.
+		NeedsDocker: spec.Image != "", NeedsNvidia: spec.Image != "" && spec.GPUs > 0,
 	}
 }
 
@@ -279,7 +281,7 @@ func (c *Controller) startAttemptLocked(t *store.Task, p scheduler.Placement) {
 	ts := &pb.TaskSpec{
 		Command: substitute(spec.Command, t.Index), Env: env,
 		Cpus: spec.CPUs, MemoryBytes: spec.MemoryBytes, TimeoutSeconds: spec.TimeoutSec,
-		Outputs: spec.Outputs,
+		Outputs: spec.Outputs, Image: spec.Image,
 	}
 	for _, in := range spec.Inputs {
 		ts.Inputs = append(ts.Inputs, &pb.InputFile{

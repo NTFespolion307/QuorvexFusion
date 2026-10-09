@@ -134,10 +134,12 @@ arguments).`,
   cluster submit --script train.py --input data/ --output 'model/*' --gpus 1 -- --epochs 10
   cluster submit --array 1-2500:10 --input scene.blend --output 'frames/*' -- \
       'blender -b scene.blend -o //frames/f_#### -s {i} -e $(( {i} + 9 )) -a'
+  cluster submit --image python:3.12-slim --input data/ --output 'out/*' -- python3 -c 'print(1)'
+  cluster submit --image nvidia/cuda:12.4.1-base-ubuntu22.04 --gpus 1 -f -- nvidia-smi
   cluster submit -f -- uname -a`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if script == "" && len(args) == 0 {
-				return errors.New("give a command after --, or a --script")
+			if script == "" && len(args) == 0 && spec.Image == "" {
+				return errors.New("give a command after --, a --script, or an --image")
 			}
 			local, err := collectInputs(inputs)
 			if err != nil {
@@ -232,6 +234,7 @@ arguments).`,
 	f.StringArrayVar(&sharedInputs, "shared-input", nil, "path in the nodes' shared storage, linked without transfer: PATH or PATH:DEST (repeatable)")
 	f.StringArrayVarP(&spec.Outputs, "output", "o", nil, "files to collect after each task, a glob like 'out/*.png' or 'results/**' (repeatable)")
 	f.StringVar(&script, "script", "", "upload this script and run it; arguments after -- are passed to it")
+	f.StringVar(&spec.Image, "image", "", "run each task in this Docker image (the command runs inside it; none = the image's default)")
 	f.BoolVarP(&wait, "wait", "w", false, "wait until all tasks finish")
 	f.BoolVarP(&follow, "follow", "f", false, "stream output (single-task jobs) or wait for the job")
 	return cmd
@@ -502,6 +505,9 @@ func jobsCmd() *cobra.Command {
 			}
 			s := j.Spec
 			fmt.Printf("Job %s (%s): %s\n", j.ID, j.State, j.Name)
+			if s.Image != "" {
+				fmt.Printf("  image:     %s\n", s.Image)
+			}
 			fmt.Printf("  command:   %s\n", s.Command)
 			fmt.Printf("  resources: %.4g CPU, %s memory, %d GPU per task\n", s.CPUs, humanBytesOr(s.MemoryBytes, "unreserved"), s.GPUs)
 			if s.Array != "" {
