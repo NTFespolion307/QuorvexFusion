@@ -2,6 +2,7 @@
 
 import { api } from "../api.js";
 import { html, setHTML, toast, stateBadge, ago, num, bytes, bar, pct, parseKV, coalesce, confirmDialog } from "../util.js";
+import { EXAMPLES, applyExample } from "../examples.js";
 export { outputLink };
 
 // Link to download one output file of a task.
@@ -17,7 +18,11 @@ export async function render(main, _params, ctx) {
       <button class="btn primary" id="toggle-form">New job</button>
     </div>
     <form class="card stack hidden" id="submit">
-      <h2>Submit a job</h2>
+      <div class="row"><h2 style="margin:0">Submit a job</h2><span style="flex:1"></span>
+        <select id="example" style="width:auto;max-width:100%">
+          <option value="">Start from an example…</option>
+          ${EXAMPLES.map((e) => html`<option value="${e.id}">${e.name}</option>`)}
+        </select></div>
       <label class="field"><span id="command-label">Command (runs with /bin/sh -c; {i} is replaced by the array index)</span>
         <textarea name="command" rows="3" placeholder="python3 simulate.py --seed {i}"></textarea></label>
       <div class="form-grid">
@@ -69,6 +74,13 @@ export async function render(main, _params, ctx) {
   form.array.addEventListener("input", () => {
     const n = countArray(form.array.value);
     document.getElementById("array-hint").textContent = n === null ? "e.g. 16, 1-500, 0-99:10 or 1,5,9" : `${n} task${n === 1 ? "" : "s"}`;
+  });
+  document.getElementById("example").addEventListener("change", async (e) => {
+    try {
+      await applyExample(form, e.target.value);
+    } catch (err) {
+      toast(err.message, "err");
+    }
   });
   form.script.addEventListener("change", () => {
     document.getElementById("command-label").textContent = form.script.files.length

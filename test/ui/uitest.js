@@ -104,6 +104,23 @@ async function login(page) {
     await page.waitForFunction(() => document.querySelector("#log")?.textContent.includes("script says first-arg"), null, { timeout: 10000 });
     check("uploaded script ran with its argument", true);
 
+    // Examples: the GPU benchmark attaches its script; the hello example runs.
+    await page.goto(base + "/#/jobs");
+    await page.click("#toggle-form");
+    await page.selectOption("#example", "gpu-benchmark-container");
+    await page.waitForFunction(() => document.querySelector("input[name=script]").files.length === 1);
+    check("example attaches its script",
+      (await page.inputValue("input[name=image]")).startsWith("pytorch/") &&
+      (await page.textContent("#command-label")).includes("gpu-benchmark.py"));
+    await page.selectOption("#example", "hello");
+    check("switching examples resets the form",
+      (await page.inputValue("input[name=image]")) === "" &&
+      (await page.evaluate(() => document.querySelector("input[name=script]").files.length)) === 0);
+    await page.click("#submit button[type=submit]");
+    await page.waitForURL(/#\/jobs\/j[0-9a-f]+$/);
+    await page.waitForFunction(() => document.querySelector("#state")?.textContent.includes("succeeded"), null, { timeout: 30000 });
+    check("hello example runs 8 tasks", (await page.locator("#tasks tbody tr").count()) === 8);
+
     // Live log of a running task.
     await page.goto(`${base}/#/tasks/${LOG_TASK_ID}`);
     await page.waitForFunction(() => /line [3-9]/.test(document.querySelector("#log")?.textContent || ""), null, { timeout: 20000 });
